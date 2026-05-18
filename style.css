@@ -33,7 +33,7 @@ body {
   align-items: center;
   gap: 20px;
   padding: 12px 20px;
-  width: 1002px; /* 1000px canvas + 1px border each side */
+  width: 1282px; /* 1280px canvas + 1px border each side */
   background: #0d0d1a;
   border: 1px solid #333355;
   border-top: none; /* flush with canvas bottom border */
@@ -89,4 +89,15 @@ body {
 
 #controls button:active {
   background: #6666cc;
+}
+
+/* Greyed out during projectile flight. */
+#controls input[type="number"]:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+#controls button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }

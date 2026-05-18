@@ -5,8 +5,8 @@
 // Think of it like the settings menu for the whole game.
 
 // How big the game canvas is, in pixels.
-export const CANVAS_WIDTH  = 1000;
-export const CANVAS_HEIGHT = 600;
+export const CANVAS_WIDTH  = 1280;
+export const CANVAS_HEIGHT = 720;
 
 // The y position (in pixels from the top) where building bases sit.
 export const GROUND_Y = CANVAS_HEIGHT;
@@ -60,8 +60,8 @@ export const WIND_TEXT_COLOR  = "#aaaacc";
 
 // The little triangle that floats above whoever's turn it is.
 export const ACTIVE_INDICATOR_COLOR         = "#ffffff";
-export const ACTIVE_INDICATOR_BOUNCE_PIXELS = 4;  // how far it bobs up and down
-export const ACTIVE_INDICATOR_SIZE          = 8;   // half-width of the triangle
+export const ACTIVE_INDICATOR_BOUNCE_PIXELS = 4;
+export const ACTIVE_INDICATOR_SIZE          = 8;
 
 // Angle and velocity inputs — min, max, and sensible defaults.
 export const ANGLE_MIN     = 0;
@@ -72,6 +72,31 @@ export const VELOCITY_MIN     = 0;
 export const VELOCITY_MAX     = 100;
 export const VELOCITY_DEFAULT = 50;
 
+// Physics — how the projectile moves through the air.
+// Gravity pulls it down; wind pushes it sideways; VELOCITY_SCALE converts
+// the player's input number into actual pixels-per-second speed.
+export const GRAVITY          = 400;  // pixels per second², pulling downward
+export const VELOCITY_SCALE   = 6;    // input 100 → 600 px/s launch speed
+export const WIND_ACCEL_SCALE = 4;    // wind 10 → 40 px/s² sideways push
+
+// The projectile (placeholder banana shape for now).
+export const PROJECTILE_RADIUS           = 6;
+export const PROJECTILE_COLOR            = "#ffd84d";       // warm yellow
+export const PROJECTILE_SPIN_RATE        = 12;              // radians per second
+export const PROJECTILE_TRAIL_MAX_POINTS = 40;
+export const PROJECTILE_TRAIL_COLOR_RGBA = "rgba(255, 216, 77, 0.35)";
+
+// Where the projectile is born — offset from the character's centre.
+export const LAUNCH_OFFSET_X = 18;   // pixels toward the throwing side
+export const LAUNCH_OFFSET_Y = -12;  // pixels above the character centre (the raised hand)
+
+// How long the character holds their arm up before the throw actually launches.
+export const ARM_UP_DURATION_MS = 250;
+
+// Cap on how much time can pass in one frame, so a paused/backgrounded tab
+// doesn't cause a giant physics jump when the player comes back.
+export const MAX_FRAME_DT = 0.05; // seconds
+
 // All the colours used in the game.
 export const COLORS = {
   sky:    "#0d0d1a",
@@ -80,10 +105,9 @@ export const COLORS = {
 };
 
 // GameState lists every possible screen or phase the game can be in.
-// We won't use them all in Phase 3, but naming them now keeps things honest.
 // TITLE       = the title screen (wired up in a later polish phase)
 // PLAYER_TURN = a player is choosing their angle and velocity
-// RESOLVING   = a throw is in the air (Phase 4)
+// RESOLVING   = a throw is in the air
 // ROUND_END   = someone was hit (Phase 5)
 // MATCH_END   = someone reached the score limit (Phase 5)
 export const GameState = Object.freeze({

@@ -1,8 +1,8 @@
 // render.js
-// This file handles drawing things onto the canvas.
-// It draws the sky, the wind bar, the city, the characters, the HUD,
-// and the little bouncing triangle above whoever's turn it is.
-// Later it will also draw flying projectiles and explosions.
+// This file handles drawing everything onto the canvas.
+// It draws the sky, wind bar, city, characters, the flying projectile,
+// the HUD, and the bouncing indicator above the active player.
+// Phase 5 will add explosion animations here.
 
 import {
   CANVAS_WIDTH,
@@ -26,6 +26,10 @@ import {
   ACTIVE_INDICATOR_COLOR,
   ACTIVE_INDICATOR_BOUNCE_PIXELS,
   ACTIVE_INDICATOR_SIZE,
+  PROJECTILE_RADIUS,
+  PROJECTILE_COLOR,
+  PROJECTILE_TRAIL_COLOR_RGBA,
+  PROJECTILE_TRAIL_MAX_POINTS,
 } from "./config.js";
 
 // Fill the whole canvas with the night-sky colour.
@@ -102,20 +106,25 @@ export function drawCity(ctx, city) {
   }
 }
 
-// Draw a simple placeholder character — coloured body, round head, eyes, smile.
-export function drawCharacter(ctx, character) {
+// Draw a character. pose can be 'idle' or 'armUp'.
+// In 'armUp', a small stick extends upward from the throwing shoulder —
+// a quick way to show the character is winding up to throw.
+export function drawCharacter(ctx, character, pose = "idle") {
   const cx         = character.x + character.width / 2;
   const headRadius = 7;
   const headCY     = character.y + headRadius;
 
+  // Body.
   ctx.fillStyle = character.color;
   ctx.fillRect(character.x + 4, character.y + headRadius + 5, character.width - 8, 20);
 
+  // Head.
   ctx.beginPath();
   ctx.arc(cx, headCY, headRadius, 0, Math.PI * 2);
   ctx.fillStyle = character.color;
   ctx.fill();
 
+  // Eyes — shifted toward the facing direction.
   const eyeY      = headCY - 2;
   const eyeOffset = character.facingRight ? 2 : -2;
   ctx.fillStyle = "#000000";
@@ -126,9 +135,58 @@ export function drawCharacter(ctx, character) {
   ctx.arc(cx + eyeOffset + 3, eyeY, 1.5, 0, Math.PI * 2);
   ctx.fill();
 
+  // Smile.
   ctx.beginPath();
   ctx.arc(cx, headCY, 4, 0.15 * Math.PI, 0.85 * Math.PI);
   ctx.strokeStyle = "#000000";
+  ctx.lineWidth   = 1.5;
+  ctx.stroke();
+
+  // Arm-up pose: a stick from the shoulder pointing upward on the throwing side.
+  if (pose === "armUp") {
+    const side        = character.facingRight ? 1 : -1;
+    const shoulderX   = cx + side * 8;
+    const shoulderY   = character.y + headRadius + 7;
+    const handX       = shoulderX + side * 7;
+    const handY       = shoulderY - 13;
+
+    ctx.strokeStyle = character.color;
+    ctx.lineWidth   = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(shoulderX, shoulderY);
+    ctx.lineTo(handX, handY);
+    ctx.stroke();
+  }
+}
+
+// Draw the flying projectile plus its fading trail.
+// The trail shows where the projectile has been — older dots are more transparent.
+export function drawProjectile(ctx, projectile) {
+  // Trail — dots fade from invisible at the back to semi-opaque near the front.
+  for (let i = 0; i < projectile.trail.length; i++) {
+    const point     = projectile.trail[i];
+    const progress  = i / PROJECTILE_TRAIL_MAX_POINTS; // 0 = oldest, ~1 = newest
+    const alpha     = progress * 0.55;
+    const dotRadius = 1.5 + progress * 2; // dots grow slightly toward the front
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, dotRadius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 216, 77, ${alpha})`;
+    ctx.fill();
+  }
+
+  // The projectile itself — a filled circle.
+  ctx.beginPath();
+  ctx.arc(projectile.x, projectile.y, PROJECTILE_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = PROJECTILE_COLOR;
+  ctx.fill();
+
+  // A thin line across the circle that rotates as it spins — looks like it's tumbling.
+  const sx = Math.cos(projectile.spin) * PROJECTILE_RADIUS;
+  const sy = Math.sin(projectile.spin) * PROJECTILE_RADIUS;
+  ctx.beginPath();
+  ctx.moveTo(projectile.x - sx, projectile.y - sy);
+  ctx.lineTo(projectile.x + sx, projectile.y + sy);
+  ctx.strokeStyle = "rgba(255, 255, 180, 0.75)";
   ctx.lineWidth   = 1.5;
   ctx.stroke();
 }
@@ -145,34 +203,51 @@ export function drawHUD(ctx, activePlayerIndex) {
   ctx.fillText(`${name}'S TURN`, 10, WIND_BAR_HEIGHT + 6);
 }
 
-// Draw the small downward-pointing triangle that floats above the active character.
-// timeMs makes it gently bob up and down so it catches the eye.
+// Draw the small downward-pointing triangle that bobs above the active character.
 export function drawActiveIndicator(ctx, character, timeMs) {
   const bobOffset = Math.sin(timeMs / 300) * ACTIVE_INDICATOR_BOUNCE_PIXELS;
   const cx        = character.x + character.width / 2;
-
-  // The tip of the triangle points DOWN toward the character's head.
-  const tipY  = character.y - 14 + bobOffset;
-  const baseY = tipY - ACTIVE_INDICATOR_SIZE * 1.2;
+  const tipY      = character.y - 14 + bobOffset;
+  const baseY     = tipY - ACTIVE_INDICATOR_SIZE * 1.2;
 
   ctx.beginPath();
-  ctx.moveTo(cx,                         tipY);   // bottom point
-  ctx.lineTo(cx - ACTIVE_INDICATOR_SIZE, baseY);  // top-left
-  ctx.lineTo(cx + ACTIVE_INDICATOR_SIZE, baseY);  // top-right
+  ctx.moveTo(cx,                         tipY);
+  ctx.lineTo(cx - ACTIVE_INDICATOR_SIZE, baseY);
+  ctx.lineTo(cx + ACTIVE_INDICATOR_SIZE, baseY);
   ctx.closePath();
   ctx.fillStyle = ACTIVE_INDICATOR_COLOR;
   ctx.fill();
 }
 
-// Draw the full scene in the correct order.
-// sky → wind indicator → buildings → characters → HUD → active indicator
-export function drawScene(ctx, world, activePlayerIndex, timeMs) {
+// Draw the full scene.
+// Order: sky → wind indicator → buildings → characters → projectile → HUD → indicator
+//
+// Extra state passed in the second options object:
+//   projectile        — the in-flight projectile, or null
+//   throwingPlayerIndex — who threw (for arm-up pose)
+//   isArmUp           — true during the brief pre-launch pose
+export function drawScene(ctx, world, activePlayerIndex, timeMs, {
+  projectile         = null,
+  throwingPlayerIndex = -1,
+  isArmUp            = false,
+} = {}) {
   drawSky(ctx);
   drawWindIndicator(ctx, world.wind);
   drawCity(ctx, world.city);
-  for (const character of world.characters) {
-    drawCharacter(ctx, character);
+
+  for (let i = 0; i < world.characters.length; i++) {
+    const pose = (isArmUp && i === throwingPlayerIndex) ? "armUp" : "idle";
+    drawCharacter(ctx, world.characters[i], pose);
   }
+
+  if (projectile !== null) {
+    drawProjectile(ctx, projectile);
+  }
+
   drawHUD(ctx, activePlayerIndex);
-  drawActiveIndicator(ctx, world.characters[activePlayerIndex], timeMs);
+
+  // Only show the bobbing indicator when a player is actually choosing their shot.
+  if (!isArmUp && projectile === null) {
+    drawActiveIndicator(ctx, world.characters[activePlayerIndex], timeMs);
+  }
 }
