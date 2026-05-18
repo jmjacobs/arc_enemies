@@ -28,9 +28,14 @@ import {
   ACTIVE_INDICATOR_SIZE,
   PROJECTILE_RADIUS,
   PROJECTILE_COLOR,
-  PROJECTILE_TRAIL_COLOR_RGBA,
   PROJECTILE_TRAIL_MAX_POINTS,
+  AIM_LINE_LENGTH_SCALE,
+  AIM_LINE_DOT_COUNT,
+  AIM_LINE_DOT_RADIUS,
+  HINT_TEXT,
+  HINT_COLOR,
 } from "./config.js";
+import { getLaunchPoint } from "./physics.js";
 
 // Fill the whole canvas with the night-sky colour.
 export function drawSky(ctx) {
@@ -191,6 +196,43 @@ export function drawProjectile(ctx, projectile) {
   ctx.stroke();
 }
 
+// Draw a line of dots from the active character's launch point showing the
+// throw direction and power. Longer line = more velocity. The dots fade out
+// toward the far end so it reads as "this is the direction, not a prediction."
+export function drawAimLine(ctx, character, angle, velocity) {
+  const { x: startX, y: startY } = getLaunchPoint(character);
+  const facing     = character.facingRight ? 1 : -1;
+  const angleRad   = angle * (Math.PI / 180);
+  const lineLength = velocity * AIM_LINE_LENGTH_SCALE;
+
+  // End point — up and to the facing side, based on the angle.
+  const endX = startX + lineLength * Math.cos(angleRad) * facing;
+  const endY = startY - lineLength * Math.sin(angleRad); // minus = upward
+
+  for (let i = 0; i < AIM_LINE_DOT_COUNT; i++) {
+    const t     = i / (AIM_LINE_DOT_COUNT - 1); // 0 at start, 1 at end
+    const dotX  = startX + (endX - startX) * t;
+    const dotY  = startY + (endY - startY) * t;
+    // Full opacity near the character, fading to ~0.12 at the far end.
+    const alpha = 0.55 * (1 - t * 0.78);
+
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, AIM_LINE_DOT_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(2)})`;
+    ctx.fill();
+  }
+}
+
+// Draw a small hint below the HUD reminding players how to aim.
+// Only shown during a player's turn — hidden during flight.
+export function drawHint(ctx) {
+  ctx.font         = "11px 'Courier New', monospace";
+  ctx.fillStyle    = HINT_COLOR;
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(HINT_TEXT, 10, WIND_BAR_HEIGHT + 26);
+}
+
 // Draw "PLAYER 1'S TURN" (or 2) in that player's colour in the top-left corner.
 export function drawHUD(ctx, activePlayerIndex) {
   const name  = PLAYER_NAMES[activePlayerIndex].toUpperCase();
@@ -220,16 +262,23 @@ export function drawActiveIndicator(ctx, character, timeMs) {
 }
 
 // Draw the full scene.
-// Order: sky → wind indicator → buildings → characters → projectile → HUD → indicator
+// Order: sky → wind indicator → buildings → characters → aim line →
+//        projectile → HUD → hint → active indicator
 //
-// Extra state passed in the second options object:
-//   projectile        — the in-flight projectile, or null
+// Options object fields:
+//   projectile          — the in-flight projectile, or null
 //   throwingPlayerIndex — who threw (for arm-up pose)
-//   isArmUp           — true during the brief pre-launch pose
+//   isArmUp             — true during the brief pre-launch pose
+//   aim                 — { angle, velocity } for the aim line
+//   showAimLine         — draw the aim line (only during PLAYER_TURN)
+//   showHint            — draw the keyboard hint (only during PLAYER_TURN)
 export function drawScene(ctx, world, activePlayerIndex, timeMs, {
-  projectile         = null,
+  projectile          = null,
   throwingPlayerIndex = -1,
-  isArmUp            = false,
+  isArmUp             = false,
+  aim                 = null,
+  showAimLine         = false,
+  showHint            = false,
 } = {}) {
   drawSky(ctx);
   drawWindIndicator(ctx, world.wind);
@@ -240,13 +289,22 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
     drawCharacter(ctx, world.characters[i], pose);
   }
 
+  // Aim line sits on top of buildings but below the projectile and HUD.
+  if (showAimLine && aim) {
+    drawAimLine(ctx, world.characters[activePlayerIndex], aim.angle, aim.velocity);
+  }
+
   if (projectile !== null) {
     drawProjectile(ctx, projectile);
   }
 
   drawHUD(ctx, activePlayerIndex);
 
-  // Only show the bobbing indicator when a player is actually choosing their shot.
+  if (showHint) {
+    drawHint(ctx);
+  }
+
+  // Bobbing indicator only when the player is actively choosing their shot.
   if (!isArmUp && projectile === null) {
     drawActiveIndicator(ctx, world.characters[activePlayerIndex], timeMs);
   }

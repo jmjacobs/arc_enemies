@@ -11,7 +11,22 @@ import {
   PROJECTILE_SPIN_RATE,
   PROJECTILE_TRAIL_MAX_POINTS,
   PROJECTILE_RADIUS,
+  CHARACTER_WIDTH,
+  CHARACTER_HEIGHT,
+  LAUNCH_OFFSET_X,
+  LAUNCH_OFFSET_Y,
 } from "./config.js";
+
+// Return the pixel position where a projectile is born for this character.
+// Both game.js (to create the projectile) and render.js (to draw the aim line)
+// use this so the two are always in sync.
+export function getLaunchPoint(character) {
+  const facing = character.facingRight ? 1 : -1;
+  return {
+    x: character.x + CHARACTER_WIDTH / 2 + LAUNCH_OFFSET_X * facing,
+    y: character.y + CHARACTER_HEIGHT / 2 + LAUNCH_OFFSET_Y,
+  };
+}
 
 // Work out how fast the projectile starts moving, based on the angle the
 // player chose and the facing direction of the throwing character.

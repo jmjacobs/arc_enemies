@@ -9,17 +9,13 @@ import {
   GameState,
   ANGLE_DEFAULT,
   VELOCITY_DEFAULT,
-  CHARACTER_WIDTH,
-  CHARACTER_HEIGHT,
-  LAUNCH_OFFSET_X,
-  LAUNCH_OFFSET_Y,
   ARM_UP_DURATION_MS,
   MAX_FRAME_DT,
 } from "./config.js";
 import { generateWorld } from "./world.js";
-import { launchVelocity, stepProjectile, isOffScreen, hitsBuilding } from "./physics.js";
+import { getLaunchPoint, launchVelocity, stepProjectile, isOffScreen, hitsBuilding } from "./physics.js";
 import { drawScene } from "./render.js";
-import { setupInput, setInputDefaults, setInputEnabled, focusAngleInput } from "./input.js";
+import { setupInput, setAim, getAim, setInputEnabled } from "./input.js";
 
 window.addEventListener("DOMContentLoaded", () => {
   const canvas = document.getElementById("game");
@@ -31,19 +27,33 @@ window.addEventListener("DOMContentLoaded", () => {
   // --- Game state ---
   let currentState        = GameState.PLAYER_TURN;
   let world               = generateWorld();
-  let activePlayerIndex   = 0;       // 0 = Player 1, 1 = Player 2
-  let throwingPlayerIndex = 0;       // tracks who threw during RESOLVING
-  let projectile          = null;    // null when nothing is in flight
-  let isArmUp             = false;   // true during the pre-launch pose window
-  let armUpTimer          = null;    // so we can cancel the arm-up on R
+  let activePlayerIndex   = 0;
+  let throwingPlayerIndex = 0;
+  let projectile          = null;
+  let isArmUp             = false;
+  let armUpTimer          = null;
 
-  // Remember each player's last shot so we can pre-fill the inputs next turn.
+  // Per-player memory of their last shot, so we can restore it on their next turn.
   let lastShots = [
     { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
     { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
   ];
 
-  // Called when the active player presses Throw.
+  // Draw the current frame. Called by the RAF loop and also immediately after
+  // any aim change so the aim line never lags behind a key press.
+  function redraw(timeMs = performance.now()) {
+    const isPlayerTurn = currentState === GameState.PLAYER_TURN && !isArmUp;
+    drawScene(ctx, world, activePlayerIndex, timeMs, {
+      projectile,
+      throwingPlayerIndex,
+      isArmUp,
+      aim:         getAim(),
+      showAimLine: isPlayerTurn,
+      showHint:    isPlayerTurn,
+    });
+  }
+
+  // Called when the active player throws.
   function handleThrow({ angle, velocity }) {
     lastShots[activePlayerIndex] = { angle, velocity };
 
@@ -52,65 +62,52 @@ window.addEventListener("DOMContentLoaded", () => {
       `Player ${playerNumber} throws: angle ${angle}°, velocity ${velocity}, wind ${world.wind}`
     );
 
-    // Lock the controls so the player can't throw again mid-flight.
     setInputEnabled(false);
     currentState        = GameState.RESOLVING;
     throwingPlayerIndex = activePlayerIndex;
     isArmUp             = true;
 
-    // Hold the arm-up pose briefly, then launch.
     armUpTimer = setTimeout(() => {
       armUpTimer = null;
       isArmUp    = false;
 
-      const character = world.characters[throwingPlayerIndex];
-      const facing    = character.facingRight ? 1 : -1;
+      const character  = world.characters[throwingPlayerIndex];
+      const facing     = character.facingRight ? 1 : -1;
+      const { x: launchX, y: launchY } = getLaunchPoint(character);
       const { vx, vy } = launchVelocity(angle, velocity, facing);
 
-      // The projectile starts at the character's raised-hand position.
-      const launchX = character.x + CHARACTER_WIDTH / 2 + LAUNCH_OFFSET_X * facing;
-      const launchY = character.y + CHARACTER_HEIGHT / 2 + LAUNCH_OFFSET_Y;
-
-      projectile = {
-        x:           launchX,
-        y:           launchY,
-        vx,
-        vy,
-        spin:        0,
-        trail:       [],
-        framesAlive: 0,
-      };
+      projectile = { x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0 };
     }, ARM_UP_DURATION_MS);
   }
 
-  // Resolve the turn after the projectile stops flying.
+  // Called when the projectile stops — either hits a building or leaves the screen.
   function resolveProjectile(hitBuildingIndex) {
     const playerNumber = throwingPlayerIndex + 1;
-    const outcome = hitBuildingIndex !== -1 ? "hit a building" : "left the screen";
+    const outcome      = hitBuildingIndex !== -1 ? "hit a building" : "left the screen";
     console.log(`Player ${playerNumber} - projectile ${outcome}`);
 
-    projectile = null;
+    projectile        = null;
     activePlayerIndex = activePlayerIndex === 0 ? 1 : 0;
     currentState      = GameState.PLAYER_TURN;
 
     setInputEnabled(true);
-    setInputDefaults(lastShots[activePlayerIndex].angle, lastShots[activePlayerIndex].velocity);
-    focusAngleInput();
+    setAim(lastShots[activePlayerIndex].angle, lastShots[activePlayerIndex].velocity);
   }
 
-  // Build the controls UI and connect the throw handler.
-  setupInput({ onThrow: handleThrow });
-  setInputDefaults(lastShots[0].angle, lastShots[0].velocity);
-  focusAngleInput();
+  // Build the controls and hook up callbacks.
+  setupInput({
+    onThrow:      handleThrow,
+    onAimChanged: () => redraw(), // instant redraw so the aim line never lags
+  });
+
+  // Initialise with Player 1's defaults.
+  setAim(ANGLE_DEFAULT, VELOCITY_DEFAULT);
 
   // R key: cancel any in-flight state and generate a fresh world.
   window.addEventListener("keydown", (event) => {
     if (event.key !== "r" && event.key !== "R") return;
 
-    if (armUpTimer !== null) {
-      clearTimeout(armUpTimer);
-      armUpTimer = null;
-    }
+    if (armUpTimer !== null) { clearTimeout(armUpTimer); armUpTimer = null; }
 
     projectile        = null;
     isArmUp           = false;
@@ -123,13 +120,10 @@ window.addEventListener("DOMContentLoaded", () => {
     ];
 
     setInputEnabled(true);
-    setInputDefaults(lastShots[0].angle, lastShots[0].velocity);
-    focusAngleInput();
+    setAim(ANGLE_DEFAULT, VELOCITY_DEFAULT);
   });
 
-  // Animation loop — runs every frame.
-  // When a projectile is in flight, it steps the physics and checks for
-  // collisions. Otherwise it just redraws the scene for the bobbing indicator.
+  // Animation loop — runs every frame for physics and the bobbing indicator.
   let lastTime = null;
 
   function tick(timeMs) {
@@ -141,7 +135,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (currentState === GameState.RESOLVING && projectile !== null) {
       stepProjectile(projectile, world.wind, dt);
 
-      const hitIndex = hitsBuilding(projectile, world.city);
+      const hitIndex  = hitsBuilding(projectile, world.city);
       const offScreen = isOffScreen(projectile, CANVAS_WIDTH, CANVAS_HEIGHT);
 
       if (hitIndex !== -1 || offScreen) {
@@ -149,12 +143,7 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    drawScene(ctx, world, activePlayerIndex, timeMs, {
-      projectile,
-      throwingPlayerIndex,
-      isArmUp,
-    });
-
+    redraw(timeMs);
     requestAnimationFrame(tick);
   }
 

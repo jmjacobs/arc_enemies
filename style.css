@@ -64,9 +64,15 @@ body {
   -webkit-appearance: none;
 }
 
+/* Read-only display — no typing cursor, no editable highlight. */
+#controls input[type="number"][readonly] {
+  cursor: default;
+  background: #111122;
+}
+
 #controls input[type="number"]:focus {
   outline: none;
-  border-color: #aaaaff;
+  border-color: #444466; /* not highlighted as an editable field */
 }
 
 #controls button {

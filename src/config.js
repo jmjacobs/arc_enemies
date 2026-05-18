@@ -97,6 +97,27 @@ export const ARM_UP_DURATION_MS = 250;
 // doesn't cause a giant physics jump when the player comes back.
 export const MAX_FRAME_DT = 0.05; // seconds
 
+// Arrow-key aiming — how much each press changes angle or velocity.
+export const ANGLE_STEP           = 1;   // degrees per press
+export const VELOCITY_STEP        = 1;   // units per press
+export const FAST_STEP_MULTIPLIER = 5;   // Shift + arrow = ×5
+
+// How the custom key-repeat feels. The browser's built-in repeat has
+// an awkward initial pause that makes it feel sluggish for a game.
+// We roll our own with these timings instead.
+export const KEY_REPEAT_INITIAL_DELAY_MS = 350; // pause before repeat starts
+export const KEY_REPEAT_INTERVAL_MS      =  55; // delay between each repeated step
+
+// The aim line drawn from the active character toward the throw direction.
+export const AIM_LINE_LENGTH_SCALE  = 1.5;  // at velocity 100, the line is 150px
+export const AIM_LINE_DOT_COUNT     = 12;
+export const AIM_LINE_DOT_RADIUS    = 2.5;
+export const AIM_LINE_COLOR_RGBA    = "rgba(255, 255, 255, 0.55)";
+
+// Hint text shown under the HUD during a player's turn.
+export const HINT_TEXT  = "↑↓ angle   ←→ power   SHIFT for ×5   SPACE to throw";
+export const HINT_COLOR = "#888888";
+
 // All the colours used in the game.
 export const COLORS = {
   sky:    "#0d0d1a",
