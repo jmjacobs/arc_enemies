@@ -5,7 +5,7 @@
 // Think of it like the settings menu for the whole game.
 
 // How big the game canvas is, in pixels.
-export const CANVAS_WIDTH  = 800;
+export const CANVAS_WIDTH  = 1000;
 export const CANVAS_HEIGHT = 600;
 
 // The y position (in pixels from the top) where building bases sit.
@@ -38,12 +38,29 @@ export const WINDOW_DARK_COLOR  = "#1e1e2a"; // dark blue-grey
 // Roughly 1 in 3 windows will be lit up.
 export const WINDOW_LIT_PROBABILITY = 0.35;
 
-// The sun — placed top-center but nudged right so it doesn't always sit
-// directly on top of a building.
-export const SUN_X      = Math.round(CANVAS_WIDTH * 0.72); // slightly right of center
-export const SUN_Y      = 80;   // near the top of the canvas
-export const SUN_RADIUS = 40;
-export const SUN_COLOR  = "#ffe94d"; // cheerful yellow
+// How big the placeholder character sprites are, in pixels.
+export const CHARACTER_WIDTH  = 28;
+export const CHARACTER_HEIGHT = 32;
+
+// One colour per player — easy to tell apart at a glance.
+export const CHARACTER_COLORS = {
+  player1: "#ff8c42", // warm orange  (left side)
+  player2: "#42c5ff", // bright blue  (right side)
+};
+
+// Wind strength. Negative = blowing left, positive = blowing right.
+// The exact units don't matter yet — Phase 4 will hook them to physics.
+export const WIND_MIN = -10;
+export const WIND_MAX =  10;
+
+// The bar at the very top of the canvas that shows the wind arrow.
+export const WIND_BAR_HEIGHT       = 30;  // pixels tall
+export const WIND_ARROW_MAX_LENGTH = 200; // pixels long at maximum wind
+
+// Colours for the wind indicator.
+export const WIND_BAR_BG      = "#111122"; // dark strip behind the arrow
+export const WIND_ARROW_COLOR = "#ffffff"; // the arrow itself
+export const WIND_TEXT_COLOR  = "#aaaacc"; // the number label
 
 // All the colours used in the game.
 export const COLORS = {
@@ -56,7 +73,6 @@ export const COLORS = {
 // TITLE     = the title screen
 // PLAYING   = a round of the game is happening
 // ROUND_END = someone just won a round
-// We'll actually use this in Phase 2, but we set it up now so the pieces are ready.
 export const GameState = Object.freeze({
   TITLE:     "TITLE",
   PLAYING:   "PLAYING",
