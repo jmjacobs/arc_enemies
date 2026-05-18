@@ -1,12 +1,13 @@
 // game.js
-// This is where the game starts.
-// It grabs the canvas, generates the world, and draws everything.
-// Later it will run the main game loop — that's the part that keeps the game
-// moving every fraction of a second, like flipping pages in a flip book.
+// This is where the game starts and where the state machine lives.
+// It knows whose turn it is, handles the Throw action, and keeps
+// redrawing the canvas every frame so the active indicator can animate.
+// Phase 4 will add the actual banana flight here.
 
-import { CANVAS_WIDTH, CANVAS_HEIGHT, GameState } from "./config.js";
+import { CANVAS_WIDTH, CANVAS_HEIGHT, GameState, ANGLE_DEFAULT, VELOCITY_DEFAULT } from "./config.js";
 import { generateWorld } from "./world.js";
 import { drawScene } from "./render.js";
+import { setupInput, setInputDefaults, focusAngleInput } from "./input.js";
 
 window.addEventListener("DOMContentLoaded", () => {
   const canvas = document.getElementById("game");
@@ -15,18 +16,59 @@ window.addEventListener("DOMContentLoaded", () => {
   canvas.width  = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
 
-  // Track which screen the game is on right now.
-  let currentState = GameState.TITLE;
+  // --- Game state ---
+  let currentState      = GameState.PLAYER_TURN;
+  let world             = generateWorld();
+  let activePlayerIndex = 0; // 0 = Player 1, 1 = Player 2
 
-  // Generate the world (city + characters + wind) and draw it.
-  let world = generateWorld();
-  drawScene(ctx, world);
+  // Remember each player's last shot so we can pre-fill the inputs next turn.
+  let lastShots = [
+    { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
+    { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
+  ];
 
-  // Press R to regenerate the whole world — new city, new positions, new wind.
+  // Called when the active player presses Throw.
+  function handleThrow({ angle, velocity }) {
+    // Save this shot so we can restore it on the player's next turn.
+    lastShots[activePlayerIndex] = { angle, velocity };
+
+    const playerNumber = activePlayerIndex + 1;
+    console.log(
+      `Player ${playerNumber} throws at angle ${angle}, velocity ${velocity} (wind: ${world.wind})`
+    );
+
+    // Hand control to the other player.
+    activePlayerIndex = activePlayerIndex === 0 ? 1 : 0;
+
+    setInputDefaults(lastShots[activePlayerIndex].angle, lastShots[activePlayerIndex].velocity);
+    focusAngleInput();
+  }
+
+  // Build the controls UI and connect the throw handler.
+  setupInput({ onThrow: handleThrow });
+
+  // Pre-fill Player 1's defaults and focus the angle field right away.
+  setInputDefaults(lastShots[0].angle, lastShots[0].velocity);
+  focusAngleInput();
+
+  // R key: fresh world, reset everything back to Player 1's turn.
   window.addEventListener("keydown", (event) => {
     if (event.key === "r" || event.key === "R") {
-      world = generateWorld();
-      drawScene(ctx, world);
+      world             = generateWorld();
+      activePlayerIndex = 0;
+      lastShots = [
+        { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
+        { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
+      ];
+      setInputDefaults(lastShots[0].angle, lastShots[0].velocity);
+      focusAngleInput();
     }
   });
+
+  // Animation loop — redraws the scene every frame so the active indicator bobs.
+  function tick(timeMs) {
+    drawScene(ctx, world, activePlayerIndex, timeMs);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 });

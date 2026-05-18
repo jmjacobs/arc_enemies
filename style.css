@@ -1,7 +1,7 @@
 /* style.css
    Makes the page look like a retro arcade game.
-   The page is black, and the game canvas sits in the middle with a white border.
-   We'll keep the "Courier New" font for now — a real pixel font comes later.
+   The canvas sits in the middle of a black page with a white border.
+   The controls panel sits directly below it.
 */
 
 * {
@@ -13,13 +13,80 @@
 body {
   background-color: #000000;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
+  padding: 20px 0;
+  gap: 0;
   font-family: "Courier New", monospace;
 }
 
 #game {
   display: block;
   border: 1px solid #ffffff;
+}
+
+/* The controls strip sits directly below the canvas, same width. */
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 20px;
+  width: 1002px; /* 1000px canvas + 1px border each side */
+  background: #0d0d1a;
+  border: 1px solid #333355;
+  border-top: none; /* flush with canvas bottom border */
+}
+
+#controls label {
+  color: #aaaacc;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+#controls input[type="number"] {
+  width: 72px;
+  padding: 8px 6px;
+  font-family: "Courier New", monospace;
+  font-size: 20px;
+  background: #1a1a2e;
+  color: #ffffff;
+  border: 2px solid #444466;
+  text-align: center;
+  border-radius: 2px;
+  /* Hide the spinner arrows — they look out of place */
+  -moz-appearance: textfield;
+}
+
+#controls input[type="number"]::-webkit-inner-spin-button,
+#controls input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+#controls input[type="number"]:focus {
+  outline: none;
+  border-color: #aaaaff;
+}
+
+#controls button {
+  padding: 10px 28px;
+  font-family: "Courier New", monospace;
+  font-size: 20px;
+  font-weight: bold;
+  background: #222244;
+  color: #ffffff;
+  border: 2px solid #6666aa;
+  cursor: pointer;
+  border-radius: 2px;
+  margin-left: auto; /* push Throw button to the right */
+}
+
+#controls button:hover {
+  background: #4444aa;
+  border-color: #aaaaff;
+}
+
+#controls button:active {
+  background: #6666cc;
 }

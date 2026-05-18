@@ -1,12 +1,15 @@
 // render.js
 // This file handles drawing things onto the canvas.
-// It draws the sky, the wind bar, the city, and the characters.
-// Later it will also draw flying projectiles, explosions, and the score.
+// It draws the sky, the wind bar, the city, the characters, the HUD,
+// and the little bouncing triangle above whoever's turn it is.
+// Later it will also draw flying projectiles and explosions.
 
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   COLORS,
+  CHARACTER_COLORS,
+  PLAYER_NAMES,
   WINDOW_WIDTH,
   WINDOW_HEIGHT,
   WINDOW_GAP_X,
@@ -20,6 +23,9 @@ import {
   WIND_ARROW_COLOR,
   WIND_TEXT_COLOR,
   WIND_MAX,
+  ACTIVE_INDICATOR_COLOR,
+  ACTIVE_INDICATOR_BOUNCE_PIXELS,
+  ACTIVE_INDICATOR_SIZE,
 } from "./config.js";
 
 // Fill the whole canvas with the night-sky colour.
@@ -29,10 +35,7 @@ export function drawSky(ctx) {
 }
 
 // Draw the wind bar across the very top of the canvas.
-// It shows an arrow pointing in the direction the wind is blowing,
-// with a number telling you how strong it is.
 export function drawWindIndicator(ctx, wind) {
-  // Dark background strip.
   ctx.fillStyle = WIND_BAR_BG;
   ctx.fillRect(0, 0, CANVAS_WIDTH, WIND_BAR_HEIGHT);
 
@@ -48,12 +51,10 @@ export function drawWindIndicator(ctx, wind) {
     return;
   }
 
-  // Work out how long the arrow should be.
   const arrowLength = (Math.abs(wind) / WIND_MAX) * WIND_ARROW_MAX_LENGTH;
-  const direction   = wind > 0 ? 1 : -1; // +1 = right, -1 = left
+  const direction   = wind > 0 ? 1 : -1;
   const arrowEndX   = centerX + direction * arrowLength;
 
-  // Draw the arrow shaft.
   ctx.strokeStyle = WIND_ARROW_COLOR;
   ctx.lineWidth   = 2;
   ctx.beginPath();
@@ -61,7 +62,6 @@ export function drawWindIndicator(ctx, wind) {
   ctx.lineTo(arrowEndX, centerY);
   ctx.stroke();
 
-  // Draw the arrowhead as a small filled triangle.
   const headSize = 6;
   ctx.beginPath();
   ctx.moveTo(arrowEndX, centerY);
@@ -71,7 +71,6 @@ export function drawWindIndicator(ctx, wind) {
   ctx.fillStyle = WIND_ARROW_COLOR;
   ctx.fill();
 
-  // Show the wind strength as a number just past the arrowhead.
   const labelX = arrowEndX + direction * 10;
   ctx.fillStyle    = WIND_TEXT_COLOR;
   ctx.font         = "11px 'Courier New', monospace";
@@ -103,27 +102,22 @@ export function drawCity(ctx, city) {
   }
 }
 
-// Draw a simple placeholder character — a coloured body with a round head,
-// two eyes, and a smile. The eyes are shifted toward whichever way they face
-// so you can tell the two players apart at a glance.
+// Draw a simple placeholder character — coloured body, round head, eyes, smile.
 export function drawCharacter(ctx, character) {
-  const cx = character.x + character.width / 2;  // centre x of the character
+  const cx         = character.x + character.width / 2;
   const headRadius = 7;
-  const headCY     = character.y + headRadius;    // centre y of the head
+  const headCY     = character.y + headRadius;
 
-  // Body rectangle below the head.
   ctx.fillStyle = character.color;
   ctx.fillRect(character.x + 4, character.y + headRadius + 5, character.width - 8, 20);
 
-  // Head circle.
   ctx.beginPath();
   ctx.arc(cx, headCY, headRadius, 0, Math.PI * 2);
   ctx.fillStyle = character.color;
   ctx.fill();
 
-  // Eyes — both dots sit on the side the character is facing.
   const eyeY      = headCY - 2;
-  const eyeOffset = character.facingRight ? 2 : -2; // nudge toward facing direction
+  const eyeOffset = character.facingRight ? 2 : -2;
   ctx.fillStyle = "#000000";
   ctx.beginPath();
   ctx.arc(cx + eyeOffset - 3, eyeY, 1.5, 0, Math.PI * 2);
@@ -132,7 +126,6 @@ export function drawCharacter(ctx, character) {
   ctx.arc(cx + eyeOffset + 3, eyeY, 1.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Smile.
   ctx.beginPath();
   ctx.arc(cx, headCY, 4, 0.15 * Math.PI, 0.85 * Math.PI);
   ctx.strokeStyle = "#000000";
@@ -140,13 +133,46 @@ export function drawCharacter(ctx, character) {
   ctx.stroke();
 }
 
-// Draw the full scene in the right order so everything appears on top of
-// the correct things: sky → wind bar → buildings → characters.
-export function drawScene(ctx, world) {
+// Draw "PLAYER 1'S TURN" (or 2) in that player's colour in the top-left corner.
+export function drawHUD(ctx, activePlayerIndex) {
+  const name  = PLAYER_NAMES[activePlayerIndex].toUpperCase();
+  const color = activePlayerIndex === 0 ? CHARACTER_COLORS.player1 : CHARACTER_COLORS.player2;
+
+  ctx.font         = "bold 16px 'Courier New', monospace";
+  ctx.fillStyle    = color;
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(`${name}'S TURN`, 10, WIND_BAR_HEIGHT + 6);
+}
+
+// Draw the small downward-pointing triangle that floats above the active character.
+// timeMs makes it gently bob up and down so it catches the eye.
+export function drawActiveIndicator(ctx, character, timeMs) {
+  const bobOffset = Math.sin(timeMs / 300) * ACTIVE_INDICATOR_BOUNCE_PIXELS;
+  const cx        = character.x + character.width / 2;
+
+  // The tip of the triangle points DOWN toward the character's head.
+  const tipY  = character.y - 14 + bobOffset;
+  const baseY = tipY - ACTIVE_INDICATOR_SIZE * 1.2;
+
+  ctx.beginPath();
+  ctx.moveTo(cx,                         tipY);   // bottom point
+  ctx.lineTo(cx - ACTIVE_INDICATOR_SIZE, baseY);  // top-left
+  ctx.lineTo(cx + ACTIVE_INDICATOR_SIZE, baseY);  // top-right
+  ctx.closePath();
+  ctx.fillStyle = ACTIVE_INDICATOR_COLOR;
+  ctx.fill();
+}
+
+// Draw the full scene in the correct order.
+// sky → wind indicator → buildings → characters → HUD → active indicator
+export function drawScene(ctx, world, activePlayerIndex, timeMs) {
   drawSky(ctx);
   drawWindIndicator(ctx, world.wind);
   drawCity(ctx, world.city);
   for (const character of world.characters) {
     drawCharacter(ctx, character);
   }
+  drawHUD(ctx, activePlayerIndex);
+  drawActiveIndicator(ctx, world.characters[activePlayerIndex], timeMs);
 }
