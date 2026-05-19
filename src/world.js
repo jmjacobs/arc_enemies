@@ -1,11 +1,14 @@
 // world.js
 // This file builds everything that makes up the game world:
 // the city skyline, where the two players stand, and how hard the wind blows.
-// It returns plain data objects — it doesn't draw anything itself.
-// Think of it like a city planner who designs everything on paper first.
+// It also owns the offscreen canvas that holds the painted city,
+// and the carveCrater function that punches holes in it when things explode.
+// Think of it like a city planner who designs everything on paper first,
+// then hands the finished painting to the game.
 
 import {
   CANVAS_WIDTH,
+  CANVAS_HEIGHT,
   GROUND_Y,
   BUILDING_COUNT_MIN,
   BUILDING_COUNT_MAX,
@@ -17,6 +20,8 @@ import {
   WINDOW_GAP_X,
   WINDOW_GAP_Y,
   WINDOW_MARGIN,
+  WINDOW_LIT_COLOR,
+  WINDOW_DARK_COLOR,
   WINDOW_LIT_PROBABILITY,
   CHARACTER_WIDTH,
   CHARACTER_HEIGHT,
@@ -68,8 +73,26 @@ function generateBuildingWidths(n, canvasWidth) {
   return widths;
 }
 
-// Generate the city and return an array of Building objects.
-// Each building has: x, y (top-left corner), width, height, color, windows.
+// Paint one building (walls + windows) onto any canvas context.
+function drawBuildingToCtx(ctx, building) {
+  ctx.fillStyle = building.color;
+  ctx.fillRect(building.x, building.y, building.width, building.height);
+
+  const grid = building.windows;
+  for (let row = 0; row < grid.length; row++) {
+    for (let col = 0; col < grid[row].length; col++) {
+      const windowX = building.x + WINDOW_MARGIN + col * (WINDOW_WIDTH  + WINDOW_GAP_X);
+      const windowY = building.y + WINDOW_MARGIN + row * (WINDOW_HEIGHT + WINDOW_GAP_Y);
+      ctx.fillStyle = grid[row][col] ? WINDOW_LIT_COLOR : WINDOW_DARK_COLOR;
+      ctx.fillRect(windowX, windowY, WINDOW_WIDTH, WINDOW_HEIGHT);
+    }
+  }
+}
+
+// Generate the city, render it to an offscreen canvas, and return all three.
+// The offscreen canvas is what gets drawn to the screen each frame — fast,
+// because we only repaint individual pixels when a crater is carved.
+// Returns { buildings, canvas, ctx } where canvas is the offscreen element.
 function generateCity() {
   const count  = randomInt(BUILDING_COUNT_MIN, BUILDING_COUNT_MAX);
   const widths = generateBuildingWidths(count, CANVAS_WIDTH);
@@ -100,7 +123,18 @@ function generateCity() {
     currentX += buildingWidth;
   }
 
-  return buildings;
+  // Paint every building onto an offscreen canvas once.
+  // willReadFrequently lets the browser optimise the pixel-read calls
+  // used by collision detection later.
+  const offscreen = document.createElement("canvas");
+  offscreen.width  = CANVAS_WIDTH;
+  offscreen.height = CANVAS_HEIGHT;
+  const offCtx = offscreen.getContext("2d", { willReadFrequently: true });
+  for (const b of buildings) {
+    drawBuildingToCtx(offCtx, b);
+  }
+
+  return { buildings, canvas: offscreen, ctx: offCtx };
 }
 
 // Choose which two buildings the players will stand on.
@@ -108,21 +142,21 @@ function generateCity() {
 // Rules: not the tallest building, not adjacent to each other,
 // and wide enough to stand on.
 // Returns { leftIndex, rightIndex }.
-function pickCharacterBuildings(city) {
-  const midpoint        = city.length / 2;
+function pickCharacterBuildings(buildings) {
+  const midpoint        = buildings.length / 2;
   const minBuildingWidth = CHARACTER_WIDTH + 10;
 
   // Find the tallest building so we can avoid putting a player on it.
   let tallestIndex = 0;
-  for (let i = 1; i < city.length; i++) {
-    if (city[i].height > city[tallestIndex].height) tallestIndex = i;
+  for (let i = 1; i < buildings.length; i++) {
+    if (buildings[i].height > buildings[tallestIndex].height) tallestIndex = i;
   }
 
   // Gather valid candidates for each half of the city.
   const leftCandidates  = [];
   const rightCandidates = [];
-  for (let i = 0; i < city.length; i++) {
-    if (city[i].width < minBuildingWidth) continue;
+  for (let i = 0; i < buildings.length; i++) {
+    if (buildings[i].width < minBuildingWidth) continue;
     if (i === tallestIndex) continue;
     if (i < midpoint) leftCandidates.push(i);
     else              rightCandidates.push(i);
@@ -137,7 +171,7 @@ function pickCharacterBuildings(city) {
 
   // Fallback: if no perfect pair exists, just pick one from each half.
   const fallbackLeft  = Math.floor(midpoint / 2);
-  const fallbackRight = Math.floor(midpoint + (city.length - midpoint) / 2);
+  const fallbackRight = Math.floor(midpoint + (buildings.length - midpoint) / 2);
   return { leftIndex: fallbackLeft, rightIndex: fallbackRight };
 }
 
@@ -163,14 +197,27 @@ export function generateWind() {
   return parseFloat(raw.toFixed(1));
 }
 
+// Punch a transparent circular hole in the city canvas at (x, y).
+// destination-out erases whatever pixels are inside the circle,
+// which is how craters appear in the buildings.
+export function carveCrater(world, x, y, radius) {
+  const offCtx = world.city.ctx;
+  offCtx.save();
+  offCtx.globalCompositeOperation = "destination-out";
+  offCtx.beginPath();
+  offCtx.arc(x, y, radius, 0, Math.PI * 2);
+  offCtx.fill();
+  offCtx.restore();
+}
+
 // Generate the whole world: city, characters, and wind.
 // This is the main function that game.js calls to set everything up.
 export function generateWorld() {
-  const city = generateCity();
-  const { leftIndex, rightIndex } = pickCharacterBuildings(city);
+  const city = generateCity(); // { buildings, canvas, ctx }
+  const { leftIndex, rightIndex } = pickCharacterBuildings(city.buildings);
 
-  const leftCharacter  = placeCharacter(city[leftIndex],  CHARACTER_COLORS.player1, 1, true);
-  const rightCharacter = placeCharacter(city[rightIndex], CHARACTER_COLORS.player2, 2, false);
+  const leftCharacter  = placeCharacter(city.buildings[leftIndex],  CHARACTER_COLORS.player1, 1, true);
+  const rightCharacter = placeCharacter(city.buildings[rightIndex], CHARACTER_COLORS.player2, 2, false);
   const wind           = generateWind();
 
   return { city, characters: [leftCharacter, rightCharacter], wind };

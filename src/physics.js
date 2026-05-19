@@ -13,8 +13,10 @@ import {
   PROJECTILE_RADIUS,
   CHARACTER_WIDTH,
   CHARACTER_HEIGHT,
+  CHARACTER_HIT_PADDING,
   LAUNCH_OFFSET_X,
   LAUNCH_OFFSET_Y,
+  BUILDING_HIT_ALPHA_THRESHOLD,
 } from "./config.js";
 
 // Return the pixel position where a projectile is born for this character.
@@ -81,28 +83,52 @@ export function isOffScreen(projectile, canvasWidth, canvasHeight) {
   );
 }
 
-// Check whether the projectile has hit any building.
-// Uses a circle-vs-rectangle check: find the closest point on the building
-// to the projectile's centre, then check if it's within the projectile's radius.
-// Returns the index of the building that was hit, or -1 if nothing was hit.
-export function hitsBuilding(projectile, city) {
-  // Skip the first few frames so the projectile doesn't immediately collide
-  // with the rooftop it was just launched from.
-  if (projectile.framesAlive < 4) return -1;
+// Check whether the projectile has touched the city canvas.
+// We read individual pixels from the offscreen canvas:
+// if any pixel under the projectile's circle has solid alpha, that's a hit.
+// This works even after craters are carved because destination-out makes
+// those pixels transparent — so the ball can fly through holes.
+export function hitsCity(projectile, cityCtx) {
+  if (projectile.framesAlive < 4) return false;
 
-  for (let i = 0; i < city.length; i++) {
-    const b = city[i];
+  const px = Math.round(projectile.x);
+  const py = Math.round(projectile.y);
+  const r  = Math.ceil(PROJECTILE_RADIUS);
 
-    // Find the point on the building rectangle closest to the projectile centre.
-    const closestX = Math.max(b.x, Math.min(projectile.x, b.x + b.width));
-    const closestY = Math.max(b.y, Math.min(projectile.y, b.y + b.height));
+  // Sample the centre and four cardinal points on the projectile's edge.
+  const points = [
+    [px,     py    ],
+    [px + r, py    ],
+    [px - r, py    ],
+    [px,     py + r],
+    [px,     py - r],
+  ];
 
-    const dx = projectile.x - closestX;
-    const dy = projectile.y - closestY;
-
-    if (dx * dx + dy * dy <= PROJECTILE_RADIUS * PROJECTILE_RADIUS) {
-      return i;
+  for (const [cx, cy] of points) {
+    try {
+      const data = cityCtx.getImageData(cx, cy, 1, 1).data;
+      if (data[3] > BUILDING_HIT_ALPHA_THRESHOLD) return true;
+    } catch (_) {
+      // Off canvas bounds — not a hit.
     }
   }
-  return -1;
+  return false;
+}
+
+// Check whether the projectile has hit a character.
+// Uses circle-vs-AABB: find the closest point on the (padded) bounding box
+// to the projectile centre, then check if it's within the projectile's radius.
+export function hitsCharacter(projectile, character) {
+  const pad    = CHARACTER_HIT_PADDING;
+  const left   = character.x - pad;
+  const right  = character.x + character.width  + pad;
+  const top    = character.y - pad;
+  const bottom = character.y + character.height + pad;
+
+  const closestX = Math.max(left, Math.min(projectile.x, right));
+  const closestY = Math.max(top,  Math.min(projectile.y, bottom));
+  const dx = projectile.x - closestX;
+  const dy = projectile.y - closestY;
+
+  return dx * dx + dy * dy <= PROJECTILE_RADIUS * PROJECTILE_RADIUS;
 }

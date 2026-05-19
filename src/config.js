@@ -118,6 +118,41 @@ export const AIM_LINE_COLOR_RGBA    = "rgba(255, 255, 255, 0.55)";
 export const HINT_TEXT  = "↑↓ angle   ←→ power   SHIFT for ×5   SPACE to throw";
 export const HINT_COLOR = "#888888";
 
+// Explosion animation — sizes, timing, and colours.
+export const EXPLOSION_CRATER_RADIUS   = 24;   // how big the hole in the building is
+export const EXPLOSION_DRAW_RADIUS     = 38;   // how big the visible flash is (building hit)
+export const EXPLOSION_BIG_DRAW_RADIUS = 64;   // how big the flash is when a character is hit
+export const EXPLOSION_DURATION_MS     = 450;  // how long before the explosion fades out
+// Colours run from the bright centre to the dark edge — like a real fireball.
+export const EXPLOSION_COLORS = ["#fff8c0", "#ffd84d", "#ff8c42", "#c94d2c"];
+
+// Extra pixels of padding added around a character's hit box.
+// Slightly bigger = more "near-miss" forgiveness for younger players.
+export const CHARACTER_HIT_PADDING = 10;
+
+// When sampling a pixel from the city canvas, alpha above this value means "solid building".
+export const BUILDING_HIT_ALPHA_THRESHOLD = 200;
+
+// How many round wins it takes to claim the whole match.
+// Change this to 1 or 2 for shorter matches, 5 for longer ones.
+export const MATCH_WIN_THRESHOLD = 3;
+
+// How long the round-win banner stays on screen before the next round starts.
+// Lower it if the kids are impatient; raise it if they want time to high-five.
+export const ROUND_END_BANNER_DURATION_MS = 2200;
+
+// The banner that pops up when someone wins a round or the whole match.
+export const BANNER_BG_RGBA        = "rgba(0, 0, 0, 0.65)";
+export const BANNER_HEIGHT         = 160;
+export const BANNER_TITLE_FONT     = 'bold 44px "Courier New", monospace';
+export const BANNER_SUBTITLE_FONT  = '24px "Courier New", monospace';
+export const BANNER_TITLE_COLOR    = "#ffffff";
+export const BANNER_SUBTITLE_COLOR = "#dddddd";
+
+// The round-win scoreboard shown inside the wind bar.
+export const SCOREBOARD_FONT     = 'bold 22px "Courier New", monospace';
+export const SCOREBOARD_MARGIN_X = 16;
+
 // All the colours used in the game.
 export const COLORS = {
   sky:    "#0d0d1a",
@@ -126,15 +161,17 @@ export const COLORS = {
 };
 
 // GameState lists every possible screen or phase the game can be in.
-// TITLE       = the title screen (wired up in a later polish phase)
-// PLAYER_TURN = a player is choosing their angle and velocity
-// RESOLVING   = a throw is in the air
-// ROUND_END   = someone was hit (Phase 5)
-// MATCH_END   = someone reached the score limit (Phase 5)
+// TITLE             = the title screen (wired up in a later phase)
+// PLAYER_TURN       = a player is choosing their angle and velocity
+// RESOLVING         = a throw is in the air
+// EXPLODING         = explosion animation is playing
+// ROUND_END_BANNER  = round-win banner is showing before the next round
+// MATCH_END         = one player has won the whole match; freeze until R
 export const GameState = Object.freeze({
-  TITLE:       "TITLE",
-  PLAYER_TURN: "PLAYER_TURN",
-  RESOLVING:   "RESOLVING",
-  ROUND_END:   "ROUND_END",
-  MATCH_END:   "MATCH_END",
+  TITLE:            "TITLE",
+  PLAYER_TURN:      "PLAYER_TURN",
+  RESOLVING:        "RESOLVING",
+  EXPLODING:        "EXPLODING",
+  ROUND_END_BANNER: "ROUND_END_BANNER",
+  MATCH_END:        "MATCH_END",
 });
