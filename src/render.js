@@ -296,7 +296,7 @@ export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed,
 
     const armed = isArmed(playerIndex);
     const color = armed ? SUPER_BOMB_INDICATOR_ARMED_COLOR : SUPER_BOMB_INDICATOR_COLOR;
-    const label = armed ? "SUPER BOMB ARMED" : `[${keyLabel}] SUPER BOMB`;
+    const label = armed ? "SUPER BOMB ARMED" : `[${keyLabel} KEY] FOR SUPER BOMB`;
 
     ctx.save();
     ctx.fillStyle   = `${color}22`;
