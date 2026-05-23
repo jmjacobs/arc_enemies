@@ -87,6 +87,18 @@ function drawBuildingToCtx(ctx, building) {
       ctx.fillRect(windowX, windowY, WINDOW_WIDTH, WINDOW_HEIGHT);
     }
   }
+
+  // Gradient shading — lighter at top, darker at bottom, for depth.
+  const shade = ctx.createLinearGradient(building.x, building.y, building.x, building.y + building.height);
+  shade.addColorStop(0,   'rgba(255,255,255,0.10)');
+  shade.addColorStop(0.4, 'rgba(0,0,0,0)');
+  shade.addColorStop(1,   'rgba(0,0,0,0.35)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(building.x, building.y, building.width, building.height);
+
+  // Bright roofline — thin highlight so each building edge reads clearly.
+  ctx.fillStyle = 'rgba(255,255,255,0.30)';
+  ctx.fillRect(building.x, building.y, building.width, 2);
 }
 
 // Generate the city, render it to an offscreen canvas, and return all three.
@@ -138,41 +150,23 @@ function generateCity() {
 }
 
 // Choose which two buildings the players will stand on.
-// Player 1 gets a building from the left half, Player 2 from the right half.
-// Rules: not the tallest building, not adjacent to each other,
-// and wide enough to stand on.
+// P1 picks randomly from the 5 leftmost buildings; P2 from the 5 rightmost.
+// Both must be wide enough for the character sprite to stand on.
 // Returns { leftIndex, rightIndex }.
 function pickCharacterBuildings(buildings) {
-  const midpoint        = buildings.length / 2;
   const minBuildingWidth = CHARACTER_WIDTH + 10;
+  const poolSize = 5;
 
-  // Find the tallest building so we can avoid putting a player on it.
-  let tallestIndex = 0;
-  for (let i = 1; i < buildings.length; i++) {
-    if (buildings[i].height > buildings[tallestIndex].height) tallestIndex = i;
+  function pickRandom(indices) {
+    const valid = indices.filter(i => buildings[i].width >= minBuildingWidth);
+    if (valid.length === 0) return indices[0]; // fallback: first in pool
+    return valid[Math.floor(Math.random() * valid.length)];
   }
 
-  // Gather valid candidates for each half of the city.
-  const leftCandidates  = [];
-  const rightCandidates = [];
-  for (let i = 0; i < buildings.length; i++) {
-    if (buildings[i].width < minBuildingWidth) continue;
-    if (i === tallestIndex) continue;
-    if (i < midpoint) leftCandidates.push(i);
-    else              rightCandidates.push(i);
-  }
+  const leftPool  = Array.from({ length: poolSize }, (_, i) => i);
+  const rightPool = Array.from({ length: poolSize }, (_, i) => buildings.length - poolSize + i);
 
-  // Find a pair that isn't adjacent (gap of at least 2 buildings between them).
-  for (const li of leftCandidates) {
-    for (const ri of rightCandidates) {
-      if (ri - li >= 2) return { leftIndex: li, rightIndex: ri };
-    }
-  }
-
-  // Fallback: if no perfect pair exists, just pick one from each half.
-  const fallbackLeft  = Math.floor(midpoint / 2);
-  const fallbackRight = Math.floor(midpoint + (buildings.length - midpoint) / 2);
-  return { leftIndex: fallbackLeft, rightIndex: fallbackRight };
+  return { leftIndex: pickRandom(leftPool), rightIndex: pickRandom(rightPool) };
 }
 
 // Place a character on top of a building.
@@ -204,6 +198,7 @@ export function carveCrater(world, x, y, radius) {
   const offCtx = world.city.ctx;
   offCtx.save();
   offCtx.globalCompositeOperation = "destination-out";
+  offCtx.fillStyle = "#000000"; // must be fully opaque so destination-out erases completely
   offCtx.beginPath();
   offCtx.arc(x, y, radius, 0, Math.PI * 2);
   offCtx.fill();

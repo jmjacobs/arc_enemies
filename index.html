@@ -8,7 +8,20 @@
 </head>
 <body>
   <canvas id="game"></canvas>
-  <div id="controls"></div>
+
   <script type="module" src="src/game.js"></script>
+  <script>
+    const GAME_W = 1280, GAME_H = 720;
+    function scaleCanvas() {
+      const scale = Math.min(
+        window.innerWidth  / (GAME_W + 2),
+        window.innerHeight / (GAME_H + 2),
+        1
+      );
+      document.getElementById("game").style.transform = `scale(${scale})`;
+    }
+    window.addEventListener("resize", scaleCanvas);
+    scaleCanvas();
+  </script>
 </body>
 </html>

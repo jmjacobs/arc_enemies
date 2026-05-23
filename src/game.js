@@ -1,14 +1,16 @@
 // game.js
-// This is where the game starts and where the state machine lives.
-// It tracks whose turn it is, runs the physics loop, handles explosions,
-// counts round wins, and decides when a round or the whole match is over.
+// State machine, physics loop, and turn management.
 
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   GameState,
-  ANGLE_DEFAULT,
-  VELOCITY_DEFAULT,
+  GameMode,
+  ANGLE_MAX,
+  VELOCITY_MAX,
+  ANGLE_CYCLE_SPEED,
+  VELOCITY_CYCLE_SPEED,
+  AIM_LINE_MIN_VELOCITY,
   ARM_UP_DURATION_MS,
   MAX_FRAME_DT,
   EXPLOSION_CRATER_RADIUS,
@@ -17,11 +19,14 @@ import {
   EXPLOSION_DURATION_MS,
   MATCH_WIN_THRESHOLD,
   ROUND_END_BANNER_DURATION_MS,
+  SUPER_BOMB_CRATER_RADIUS,
+  SUPER_BOMB_DRAW_RADIUS,
 } from "./config.js";
 import { generateWorld, carveCrater } from "./world.js";
 import { getLaunchPoint, launchVelocity, stepProjectile, isOffScreen, hitsCity, hitsCharacter } from "./physics.js";
-import { drawScene } from "./render.js";
-import { setupInput, setAim, getAim, setInputEnabled } from "./input.js";
+import { drawScene, drawCharacterSelect } from "./render.js";
+import { setupInput, setAim, getAim, setInputEnabled, setActivePlayer } from "./input.js";
+import { CHARACTERS } from "./characters.js";
 import { playSound } from "./sound.js";
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -31,30 +36,98 @@ window.addEventListener("DOMContentLoaded", () => {
   canvas.width  = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
 
-  // --- Game state ---
-  let currentState        = GameState.PLAYER_TURN;
-  let world               = generateWorld();
-  console.log(`wind:${world.wind}`);
-  let activePlayerIndex   = 0;
+  // ── Shared state ────────────────────────────────────────────────────────────
+  let currentState        = GameState.CHARACTER_SELECT;
+  let gameMode            = GameMode.SEQUENTIAL;
+  let world               = null;
+
+  // Character selection
+  let charSelectPhase = 0;   // 0 = P1, 1 = P2, 2 = mode select
+  let charPreview     = [0, 0];
+  let playerNames     = ["Player 1", "Player 2"];
+  let charNameInput   = "";
+  let gameModeIndex   = 0;   // 0 = SEQUENTIAL, 1 = PARALLEL
+
+  let activePlayerIndex       = 0;
+  let roundWinner             = -1;
+  let roundWinsByPlayer       = [0, 0];
+  let matchWinner             = null;
+  let roundEndBannerStartTime = null;
+  let superBombAvailable      = [true, true];
+
+  // ── Sequential-only state ───────────────────────────────────────────────────
   let throwingPlayerIndex = 0;
   let projectile          = null;
   let isArmUp             = false;
   let armUpTimer          = null;
   let explosion           = null;
-  let roundWinner         = -1;   // index of round winner while relevant, else -1
-  let roundWinsByPlayer   = [0, 0];
-  let matchWinner         = null; // non-null (player index) once the match is over
-  let roundEndBannerStartTime = null; // performance.now() when the round banner appeared
+  let superBombArmed      = false;
+  let cyclePhase          = 'angle';
+  let cycleStartTime      = null;
+  let lockedAngle         = 0;
 
-  // Per-player memory of their last shot, restored when their turn comes back.
-  let lastShots = [
-    { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
-    { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
-  ];
+  // ── Parallel-only state ─────────────────────────────────────────────────────
+  const parInit = () => ({
+    cyclePhase:     'angle',
+    cycleStartTime: null,
+    lockedAngle:    0,
+    aim:            { angle: 0, velocity: AIM_LINE_MIN_VELOCITY },
+    isArmUp:        false,
+    armUpTimer:     null,
+    projectile:     null,
+    explosion:      null,
+    superBombArmed: false,
+    canFire:        true,
+  });
+  let par               = [parInit(), parInit()];
+  let parallelRoundOver = false;
 
-  // Draw the current frame. Also called immediately on aim changes so the
-  // aim line never lags behind a key press.
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+  function triangleWave(elapsedMs, maxValue, speed) {
+    const periodMs   = (2 * maxValue / speed) * 1000;
+    const t          = elapsedMs % periodMs;
+    const normalized = t / periodMs;
+    return maxValue * (normalized < 0.5 ? normalized * 2 : (1 - normalized) * 2);
+  }
+
+  function buildWorld() {
+    world = generateWorld();
+    console.log(`wind:${world.wind}`);
+    world.characters[0].charType = charPreview[0];
+    world.characters[1].charType = charPreview[1];
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   function redraw(timeMs = performance.now()) {
+    if (currentState === GameState.CHARACTER_SELECT) {
+      drawCharacterSelect(ctx, { charSelectPhase, charPreview, playerNames, charNameInput, gameModeIndex }, timeMs);
+      return;
+    }
+
+    if (gameMode === GameMode.PARALLEL) {
+      const parallelData = {
+        projectiles: [par[0].projectile, par[1].projectile],
+        explosions:  [par[0].explosion,  par[1].explosion],
+        aims:        [par[0].aim,        par[1].aim],
+        isArmUp:     [par[0].isArmUp,   par[1].isArmUp],
+        showAimLine: [
+          par[0].canFire && !par[0].isArmUp && par[0].projectile === null && !parallelRoundOver,
+          par[1].canFire && !par[1].isArmUp && par[1].projectile === null && !parallelRoundOver,
+        ],
+        canFire: [par[0].canFire, par[1].canFire],
+      };
+      drawScene(ctx, world, activePlayerIndex, timeMs, {
+        roundWinsByPlayer,
+        roundBannerWinner: currentState === GameState.ROUND_END_BANNER ? roundWinner        : -1,
+        matchBannerWinner: currentState === GameState.MATCH_END        ? (matchWinner ?? -1) : -1,
+        superBombAvailable,
+        superBombArmed:    [par[0].superBombArmed, par[1].superBombArmed],
+        playerNames,
+        parallelData,
+      });
+      return;
+    }
+
     const isPlayerTurn = currentState === GameState.PLAYER_TURN && !isArmUp;
     drawScene(ctx, world, activePlayerIndex, timeMs, {
       projectile,
@@ -67,13 +140,18 @@ window.addEventListener("DOMContentLoaded", () => {
       roundWinsByPlayer,
       roundBannerWinner: currentState === GameState.ROUND_END_BANNER ? roundWinner        : -1,
       matchBannerWinner: currentState === GameState.MATCH_END        ? (matchWinner ?? -1) : -1,
+      superBombAvailable,
+      superBombArmed,
+      playerNames,
     });
   }
 
-  // Called when the active player commits to a throw.
+  // ── Sequential functions ────────────────────────────────────────────────────
   function handleThrow({ angle, velocity }) {
-    lastShots[activePlayerIndex] = { angle, velocity };
-    playSound("throw");
+    const isSuperBomb = superBombArmed;
+    playSound(isSuperBomb ? "throwSuper" : "throw");
+    superBombArmed = false;
+    if (isSuperBomb) superBombAvailable[activePlayerIndex] = false;
 
     setInputEnabled(false);
     currentState        = GameState.RESOLVING;
@@ -83,28 +161,126 @@ window.addEventListener("DOMContentLoaded", () => {
     armUpTimer = setTimeout(() => {
       armUpTimer = null;
       isArmUp    = false;
-
-      const character  = world.characters[throwingPlayerIndex];
-      const facing     = character.facingRight ? 1 : -1;
+      const character = world.characters[throwingPlayerIndex];
+      const facing    = character.facingRight ? 1 : -1;
       const { x: launchX, y: launchY } = getLaunchPoint(character);
       const { vx, vy } = launchVelocity(angle, velocity, facing);
-
-      projectile = { x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0 };
+      projectile = { x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb };
     }, ARM_UP_DURATION_MS);
   }
 
-  // Switch to the other player's turn after a building hit or a miss.
   function nextTurn() {
+    superBombArmed    = false;
+    cyclePhase        = 'angle';
+    cycleStartTime    = null;
+    lockedAngle       = 0;
     activePlayerIndex = activePlayerIndex === 0 ? 1 : 0;
     currentState      = GameState.PLAYER_TURN;
     setInputEnabled(true);
-    setAim(lastShots[activePlayerIndex].angle, lastShots[activePlayerIndex].velocity);
+    setActivePlayer(activePlayerIndex);
   }
 
-  // Reset the whole match — scores, world, and state — back to square one.
-  // Called by the R key from any state.
+  function handleSpacePress() {
+    if (currentState !== GameState.PLAYER_TURN || isArmUp) return;
+    if (gameMode === GameMode.PARALLEL) return;
+    if (cyclePhase === 'angle') {
+      lockedAngle    = Math.round(getAim().angle);
+      cyclePhase     = 'velocity';
+      cycleStartTime = null;
+      playSound("lock");
+    } else {
+      handleThrow({ angle: lockedAngle, velocity: Math.round(getAim().velocity) });
+    }
+  }
+
+  // ── Parallel functions ──────────────────────────────────────────────────────
+  function resetParallelState() {
+    for (let p = 0; p < 2; p++) {
+      if (par[p].armUpTimer !== null) clearTimeout(par[p].armUpTimer);
+      par[p] = parInit();
+    }
+    parallelRoundOver = false;
+  }
+
+  function fireParallelProjectile(p, angle, velocity) {
+    const isSuperBomb = par[p].superBombArmed;
+    par[p].superBombArmed = false;
+    if (isSuperBomb) superBombAvailable[p] = false;
+
+    playSound(isSuperBomb ? "throwSuper" : "throw");
+    par[p].canFire = false;
+    par[p].isArmUp = true;
+
+    par[p].armUpTimer = setTimeout(() => {
+      par[p].armUpTimer = null;
+      par[p].isArmUp    = false;
+      const character = world.characters[p];
+      const facing    = character.facingRight ? 1 : -1;
+      const { x: launchX, y: launchY } = getLaunchPoint(character);
+      const { vx, vy } = launchVelocity(angle, velocity, facing);
+      par[p].projectile = { x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb };
+    }, ARM_UP_DURATION_MS);
+  }
+
+  function handleParallelShift(p) {
+    if (currentState !== GameState.PLAYER_TURN || parallelRoundOver) return;
+    if (!par[p].canFire || par[p].isArmUp || par[p].projectile !== null) return;
+
+    if (par[p].cyclePhase === 'angle') {
+      par[p].lockedAngle    = Math.round(par[p].aim.angle);
+      par[p].cyclePhase     = 'velocity';
+      par[p].cycleStartTime = null;
+      playSound("lock");
+    } else {
+      const angle    = par[p].lockedAngle;
+      const velocity = Math.round(par[p].aim.velocity);
+      par[p].cyclePhase     = 'angle';
+      par[p].cycleStartTime = null;
+      par[p].lockedAngle    = 0;
+      fireParallelProjectile(p, angle, velocity);
+    }
+  }
+
+  // ── Game flow ───────────────────────────────────────────────────────────────
+  function startGame() {
+    gameMode = gameModeIndex === 0 ? GameMode.SEQUENTIAL : GameMode.PARALLEL;
+    buildWorld();
+    activePlayerIndex = 0;
+    if (gameMode === GameMode.PARALLEL) {
+      resetParallelState();
+      currentState = GameState.PLAYER_TURN;
+      setInputEnabled(false);
+    } else {
+      currentState = GameState.PLAYER_TURN;
+      setInputEnabled(true);
+      setActivePlayer(0);
+    }
+  }
+
+  function startNextRound(loserIndex) {
+    buildWorld();
+    activePlayerIndex       = loserIndex;
+    roundWinner             = -1;
+    roundEndBannerStartTime = null;
+    superBombAvailable      = [true, true];
+
+    if (gameMode === GameMode.PARALLEL) {
+      resetParallelState();
+      currentState = GameState.PLAYER_TURN;
+    } else {
+      superBombArmed = false;
+      cyclePhase     = 'angle';
+      cycleStartTime = null;
+      lockedAngle    = 0;
+      setInputEnabled(true);
+      setActivePlayer(loserIndex);
+      currentState = GameState.PLAYER_TURN;
+    }
+  }
+
   function resetMatch() {
     if (armUpTimer !== null) { clearTimeout(armUpTimer); armUpTimer = null; }
+    resetParallelState();
 
     projectile              = null;
     isArmUp                 = false;
@@ -113,32 +289,112 @@ window.addEventListener("DOMContentLoaded", () => {
     roundWinsByPlayer       = [0, 0];
     matchWinner             = null;
     roundEndBannerStartTime = null;
-    world                   = generateWorld();
-    console.log(`wind:${world.wind}`);
+    superBombAvailable      = [true, true];
+    superBombArmed          = false;
+    cyclePhase              = 'angle';
+    cycleStartTime          = null;
+    lockedAngle             = 0;
+    world                   = null;
     activePlayerIndex       = 0;
-    currentState            = GameState.PLAYER_TURN;
-    lastShots = [
-      { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
-      { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
-    ];
+    charSelectPhase         = 0;
+    gameModeIndex           = 0;
+    playerNames             = ["Player 1", "Player 2"];
+    charNameInput           = "";
+    currentState            = GameState.CHARACTER_SELECT;
 
-    setInputEnabled(true);
-    setAim(ANGLE_DEFAULT, VELOCITY_DEFAULT);
+    setInputEnabled(false);
+    setActivePlayer(0);
   }
 
-  setupInput({
-    onThrow:      handleThrow,
-    onAimChanged: () => redraw(),
-  });
+  // ── Input ───────────────────────────────────────────────────────────────────
+  setupInput({ onSpacePress: handleSpacePress });
 
-  setAim(ANGLE_DEFAULT, VELOCITY_DEFAULT);
-
-  // R resets the match from any state — even mid-flight.
   window.addEventListener("keydown", (event) => {
-    if (event.key === "r" || event.key === "R") resetMatch();
+    if (currentState === GameState.CHARACTER_SELECT) {
+      if (charSelectPhase === 2) {
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          gameModeIndex = gameModeIndex === 0 ? 1 : 0;
+          playSound("navigate");
+          redraw();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          playSound("confirm");
+          startGame();
+        }
+        return;
+      }
+
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        charNameInput = charNameInput.slice(0, -1);
+        playSound("type");
+        redraw();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        charPreview[charSelectPhase] =
+          (charPreview[charSelectPhase] - 1 + CHARACTERS.length) % CHARACTERS.length;
+        playSound("navigate");
+        redraw();
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        charPreview[charSelectPhase] =
+          (charPreview[charSelectPhase] + 1) % CHARACTERS.length;
+        playSound("navigate");
+        redraw();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        playerNames[charSelectPhase] = charNameInput.trim() || `Player ${charSelectPhase + 1}`;
+        charNameInput = "";
+        if (charSelectPhase < 1) {
+          charSelectPhase++;
+        } else {
+          charSelectPhase = 2;
+        }
+        playSound("confirm");
+        redraw();
+      } else if (event.key.length === 1 && charNameInput.length < 14) {
+        const ch = charNameInput.length === 0 ? event.key.toUpperCase() : event.key;
+        charNameInput += ch;
+        playSound("type");
+        redraw();
+      }
+      return;
+    }
+
+    if (gameMode === GameMode.PARALLEL) {
+      if (event.key === "Shift" && event.location === 1) {
+        event.preventDefault();
+        handleParallelShift(0);
+      } else if (event.key === "Shift" && event.location === 2) {
+        event.preventDefault();
+        handleParallelShift(1);
+      } else if ((event.key === "s" || event.key === "S") &&
+                 currentState === GameState.PLAYER_TURN && !parallelRoundOver &&
+                 superBombAvailable[0] && par[0].canFire && !par[0].isArmUp && par[0].projectile === null) {
+        par[0].superBombArmed = !par[0].superBombArmed;
+        playSound(par[0].superBombArmed ? "superBombArm" : "superBombDisarm");
+        redraw();
+      } else if ((event.key === "l" || event.key === "L") &&
+                 currentState === GameState.PLAYER_TURN && !parallelRoundOver &&
+                 superBombAvailable[1] && par[1].canFire && !par[1].isArmUp && par[1].projectile === null) {
+        par[1].superBombArmed = !par[1].superBombArmed;
+        playSound(par[1].superBombArmed ? "superBombArm" : "superBombDisarm");
+        redraw();
+      }
+      return;
+    }
+
+    if ((event.key === "s" || event.key === "S") &&
+        currentState === GameState.PLAYER_TURN && !isArmUp &&
+        superBombAvailable[activePlayerIndex]) {
+      superBombArmed = !superBombArmed;
+      playSound(superBombArmed ? "superBombArm" : "superBombDisarm");
+      redraw();
+    }
   });
 
-  // Animation loop — physics, state transitions, and rendering each frame.
+  // ── Animation loop ──────────────────────────────────────────────────────────
   let lastTime = null;
 
   function tick(timeMs) {
@@ -147,11 +403,82 @@ window.addEventListener("DOMContentLoaded", () => {
       : Math.min((timeMs - lastTime) / 1000, MAX_FRAME_DT);
     lastTime = timeMs;
 
-    // ── RESOLVING: projectile is in the air ──────────────────────────────
+    // ── PARALLEL PLAYER_TURN ─────────────────────────────────────────────────
+    if (currentState === GameState.PLAYER_TURN && gameMode === GameMode.PARALLEL) {
+      for (let p = 0; p < 2; p++) {
+        // Advance aim cycle for players who can still fire
+        if (par[p].canFire && !par[p].isArmUp && par[p].projectile === null && !parallelRoundOver) {
+          if (par[p].cycleStartTime === null) par[p].cycleStartTime = timeMs;
+          const elapsed = timeMs - par[p].cycleStartTime;
+          if (par[p].cyclePhase === 'angle') {
+            par[p].aim = { angle: triangleWave(elapsed, ANGLE_MAX, ANGLE_CYCLE_SPEED), velocity: AIM_LINE_MIN_VELOCITY };
+          } else {
+            par[p].aim = { angle: par[p].lockedAngle, velocity: triangleWave(elapsed, VELOCITY_MAX, VELOCITY_CYCLE_SPEED) };
+          }
+        }
+
+        // Step projectile
+        if (par[p].projectile !== null) {
+          stepProjectile(par[p].projectile, world.wind, dt);
+          const enemy = 1 - p;
+
+          if (hitsCharacter(par[p].projectile, world.characters[enemy])) {
+            roundWinsByPlayer[p]++;
+            playSound(par[p].projectile.isSuperBomb ? "explosionSuper" : "explosion");
+            playSound("roundWin");
+            const hitChar = world.characters[enemy];
+            const bigR    = par[p].projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
+            par[p].explosion  = { x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigR, startTime: timeMs };
+            par[p].projectile = null;
+            if (par[enemy].projectile !== null) par[enemy].projectile = null;
+            roundWinner       = p;
+            parallelRoundOver = true;
+
+          } else if (hitsCity(par[p].projectile, world.city.ctx)) {
+            playSound(par[p].projectile.isSuperBomb ? "explosionSuper" : "explosion");
+            const craterR    = par[p].projectile.isSuperBomb ? SUPER_BOMB_CRATER_RADIUS : EXPLOSION_CRATER_RADIUS;
+            const explosionR = par[p].projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
+            carveCrater(world, par[p].projectile.x, par[p].projectile.y, craterR);
+            par[p].explosion      = { x: par[p].projectile.x, y: par[p].projectile.y, radius: explosionR, startTime: timeMs };
+            par[p].projectile     = null;
+            par[p].canFire        = true;
+            par[p].cyclePhase     = 'angle';
+            par[p].cycleStartTime = null;
+            par[p].lockedAngle    = 0;
+
+          } else if (isOffScreen(par[p].projectile, CANVAS_WIDTH, CANVAS_HEIGHT)) {
+            playSound("miss");
+            par[p].projectile     = null;
+            par[p].canFire        = true;
+            par[p].cyclePhase     = 'angle';
+            par[p].cycleStartTime = null;
+            par[p].lockedAngle    = 0;
+          }
+        }
+
+        // Advance explosion
+        if (par[p].explosion !== null && timeMs - par[p].explosion.startTime >= EXPLOSION_DURATION_MS) {
+          par[p].explosion = null;
+        }
+      }
+
+      // Transition out of parallel round when all explosions are gone
+      if (parallelRoundOver && par[0].explosion === null && par[1].explosion === null) {
+        if (roundWinsByPlayer[roundWinner] >= MATCH_WIN_THRESHOLD) {
+          matchWinner  = roundWinner;
+          currentState = GameState.MATCH_END;
+          playSound("matchWin");
+        } else {
+          roundEndBannerStartTime = timeMs;
+          currentState = GameState.ROUND_END_BANNER;
+        }
+      }
+    }
+
+    // ── SEQUENTIAL RESOLVING ─────────────────────────────────────────────────
     if (currentState === GameState.RESOLVING && projectile !== null) {
       stepProjectile(projectile, world.wind, dt);
 
-      // Character hits take priority — check the enemy character first.
       let hitCharIndex = -1;
       for (let i = 0; i < world.characters.length; i++) {
         if (i !== throwingPlayerIndex && hitsCharacter(projectile, world.characters[i])) {
@@ -161,88 +488,69 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       if (hitCharIndex !== -1) {
-        // A player was hit — score a point for the thrower.
         const winnerIndex = throwingPlayerIndex;
-        console.log(`projectile hits Player ${hitCharIndex + 1}`);
         roundWinsByPlayer[winnerIndex]++;
-        playSound("explosion");
+        playSound(projectile.isSuperBomb ? "explosionSuper" : "explosion");
         playSound("roundWin");
-
-        const hitChar = world.characters[hitCharIndex];
-        explosion = {
-          x:         hitChar.x + hitChar.width  / 2,
-          y:         hitChar.y + hitChar.height / 2,
-          radius:    EXPLOSION_BIG_DRAW_RADIUS,
-          startTime: timeMs,
-        };
+        const hitChar   = world.characters[hitCharIndex];
+        const bigRadius = projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
+        explosion    = { x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigRadius, startTime: timeMs };
         roundWinner  = winnerIndex;
         projectile   = null;
         currentState = GameState.EXPLODING;
 
       } else if (hitsCity(projectile, world.city.ctx)) {
-        // Hit a building — carve a crater, play a smaller explosion.
-        playSound("explosion");
-        carveCrater(world, projectile.x, projectile.y, EXPLOSION_CRATER_RADIUS);
-        explosion = {
-          x:         projectile.x,
-          y:         projectile.y,
-          radius:    EXPLOSION_DRAW_RADIUS,
-          startTime: timeMs,
-        };
+        playSound(projectile.isSuperBomb ? "explosionSuper" : "explosion");
+        const craterR    = projectile.isSuperBomb ? SUPER_BOMB_CRATER_RADIUS : EXPLOSION_CRATER_RADIUS;
+        const explosionR = projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
+        carveCrater(world, projectile.x, projectile.y, craterR);
+        explosion    = { x: projectile.x, y: projectile.y, radius: explosionR, startTime: timeMs };
         projectile   = null;
         currentState = GameState.EXPLODING;
 
       } else if (isOffScreen(projectile, CANVAS_WIDTH, CANVAS_HEIGHT)) {
-        // Missed everything — switch turns, no banner.
         playSound("miss");
         projectile = null;
         nextTurn();
       }
     }
 
-    // ── EXPLODING: waiting for the animation to finish ───────────────────
+    // ── SEQUENTIAL EXPLODING ─────────────────────────────────────────────────
     if (currentState === GameState.EXPLODING && explosion !== null) {
       if (timeMs - explosion.startTime >= EXPLOSION_DURATION_MS) {
         explosion = null;
         if (roundWinner !== -1) {
-          // Explosion was for a character hit — show the round-end banner.
           roundEndBannerStartTime = timeMs;
           currentState = GameState.ROUND_END_BANNER;
         } else {
-          // Explosion was for a building hit — next player's turn.
           nextTurn();
         }
       }
     }
 
-    // ── ROUND_END_BANNER: banner is visible, waiting before next round ───
+    // ── ROUND_END_BANNER ─────────────────────────────────────────────────────
     if (currentState === GameState.ROUND_END_BANNER && roundEndBannerStartTime !== null) {
       if (timeMs - roundEndBannerStartTime >= ROUND_END_BANNER_DURATION_MS) {
         if (roundWinsByPlayer[roundWinner] >= MATCH_WIN_THRESHOLD) {
-          // This player has enough round wins to claim the match.
           matchWinner  = roundWinner;
           currentState = GameState.MATCH_END;
           playSound("matchWin");
         } else {
-          // Start the next round — the losing player throws first.
-          const loserIndex  = 1 - roundWinner;
-          activePlayerIndex = loserIndex;
-          world = generateWorld();
-          console.log(`wind:${world.wind}`);
-          lastShots = [
-            { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
-            { angle: ANGLE_DEFAULT, velocity: VELOCITY_DEFAULT },
-          ];
-          roundWinner             = -1;
-          roundEndBannerStartTime = null;
-          setInputEnabled(true);
-          setAim(ANGLE_DEFAULT, VELOCITY_DEFAULT);
-          currentState = GameState.PLAYER_TURN;
+          startNextRound(1 - roundWinner);
         }
       }
     }
 
-    // ── MATCH_END: frozen — R key (handled above) is the only way out ────
+    // ── SEQUENTIAL aim cycling ───────────────────────────────────────────────
+    if (currentState === GameState.PLAYER_TURN && !isArmUp && gameMode === GameMode.SEQUENTIAL) {
+      if (cycleStartTime === null) cycleStartTime = timeMs;
+      const elapsed = timeMs - cycleStartTime;
+      if (cyclePhase === 'angle') {
+        setAim(triangleWave(elapsed, ANGLE_MAX, ANGLE_CYCLE_SPEED), AIM_LINE_MIN_VELOCITY);
+      } else {
+        setAim(lockedAngle, triangleWave(elapsed, VELOCITY_MAX, VELOCITY_CYCLE_SPEED));
+      }
+    }
 
     redraw(timeMs);
     requestAnimationFrame(tick);

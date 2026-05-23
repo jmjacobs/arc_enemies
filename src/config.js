@@ -12,15 +12,15 @@ export const CANVAS_HEIGHT = 720;
 export const GROUND_Y = CANVAS_HEIGHT;
 
 // How many buildings to put in the city each time we generate it.
-export const BUILDING_COUNT_MIN = 8;
-export const BUILDING_COUNT_MAX = 12;
+export const BUILDING_COUNT_MIN = 14;
+export const BUILDING_COUNT_MAX = 20;
 
 // How short or tall buildings can be, in pixels.
 export const BUILDING_MIN_HEIGHT = 80;
 export const BUILDING_MAX_HEIGHT = 380;
 
-// The three building colours — CGA-ish but slightly softened.
-export const BUILDING_PALETTE = ["#8b3a3a", "#2a7a7a", "#5a5a6a"];
+// Building colours — deep jewel tones for a synthwave night-city feel.
+export const BUILDING_PALETTE = ["#5c1a5c", "#0d4070", "#1e2d5a"];
 
 // Window size and spacing on buildings.
 export const WINDOW_WIDTH       = 6;
@@ -29,18 +29,18 @@ export const WINDOW_GAP_X       = 7;
 export const WINDOW_GAP_Y       = 9;
 export const WINDOW_MARGIN      = 8;
 
-export const WINDOW_LIT_COLOR        = "#ffe066";
-export const WINDOW_DARK_COLOR       = "#1e1e2a";
+export const WINDOW_LIT_COLOR        = "#ffc84a";
+export const WINDOW_DARK_COLOR       = "#06061a";
 export const WINDOW_LIT_PROBABILITY  = 0.35;
 
 // How big the placeholder character sprites are, in pixels.
-export const CHARACTER_WIDTH  = 28;
-export const CHARACTER_HEIGHT = 32;
+export const CHARACTER_WIDTH  = 34;
+export const CHARACTER_HEIGHT = 40;
 
 // One colour per player — easy to tell apart at a glance.
 export const CHARACTER_COLORS = {
-  player1: "#ff8c42", // warm orange  (left side)
-  player2: "#42c5ff", // bright blue  (right side)
+  player1: "#ff6820", // vivid orange (left side)
+  player2: "#18b8ff", // vivid cyan   (right side)
 };
 
 // The names shown in the HUD. Phase 7 will replace these with chosen characters.
@@ -51,26 +51,26 @@ export const WIND_MIN = -10;
 export const WIND_MAX =  10;
 
 // The bar at the very top of the canvas that shows the wind arrow.
-export const WIND_BAR_HEIGHT       = 30;
+export const WIND_BAR_HEIGHT       = 68;
 export const WIND_ARROW_MAX_LENGTH = 200;
 
-export const WIND_BAR_BG      = "#111122";
-export const WIND_ARROW_COLOR = "#ffffff";
-export const WIND_TEXT_COLOR  = "#aaaacc";
+export const WIND_BAR_BG      = "#07071a";
+export const WIND_ARROW_COLOR = "#d0d0ff";
+export const WIND_TEXT_COLOR  = "#8080ff";
 
 // The little triangle that floats above whoever's turn it is.
-export const ACTIVE_INDICATOR_COLOR         = "#ffffff";
+export const ACTIVE_INDICATOR_COLOR         = "#d0d0ff";
 export const ACTIVE_INDICATOR_BOUNCE_PIXELS = 4;
 export const ACTIVE_INDICATOR_SIZE          = 8;
 
 // Angle and velocity inputs — min, max, and sensible defaults.
-export const ANGLE_MIN     = 0;
+export const ANGLE_MIN     = -30;
 export const ANGLE_MAX     = 90;
 export const ANGLE_DEFAULT = 45;
 
 export const VELOCITY_MIN     = 0;
-export const VELOCITY_MAX     = 100;
-export const VELOCITY_DEFAULT = 50;
+export const VELOCITY_MAX     = 150;
+export const VELOCITY_DEFAULT = 75;
 
 // Physics — how the projectile moves through the air.
 // Gravity pulls it down; wind pushes it sideways; VELOCITY_SCALE converts
@@ -80,7 +80,7 @@ export const VELOCITY_SCALE   = 6;    // input 100 → 600 px/s launch speed
 export const WIND_ACCEL_SCALE = 4;    // wind 10 → 40 px/s² sideways push
 
 // The projectile (placeholder banana shape for now).
-export const PROJECTILE_RADIUS           = 6;
+export const PROJECTILE_RADIUS           = 7;
 export const PROJECTILE_COLOR            = "#ffd84d";       // warm yellow
 export const PROJECTILE_SPIN_RATE        = 12;              // radians per second
 export const PROJECTILE_TRAIL_MAX_POINTS = 40;
@@ -97,38 +97,43 @@ export const ARM_UP_DURATION_MS = 250;
 // doesn't cause a giant physics jump when the player comes back.
 export const MAX_FRAME_DT = 0.05; // seconds
 
-// Arrow-key aiming — how much each press changes angle or velocity.
-export const ANGLE_STEP           = 1;   // degrees per press
-export const VELOCITY_STEP        = 1;   // units per press
-export const FAST_STEP_MULTIPLIER = 5;   // Shift + arrow = ×5
-
-// How the custom key-repeat feels. The browser's built-in repeat has
-// an awkward initial pause that makes it feel sluggish for a game.
-// We roll our own with these timings instead.
-export const KEY_REPEAT_INITIAL_DELAY_MS = 350; // pause before repeat starts
-export const KEY_REPEAT_INTERVAL_MS      =  55; // delay between each repeated step
+// Timing-based aim — the angle and velocity cycle automatically.
+// SPACE locks the angle; a second SPACE locks power and fires.
+export const ANGLE_CYCLE_SPEED    = 50;  // degrees per second (0→90 in 1.8s)
+export const VELOCITY_CYCLE_SPEED = 75;  // units per second  (0→150 in 2s)
 
 // The aim line drawn from the active character toward the throw direction.
-export const AIM_LINE_LENGTH_SCALE  = 1.5;  // at velocity 100, the line is 150px
-export const AIM_LINE_DOT_COUNT     = 12;
-export const AIM_LINE_DOT_RADIUS    = 2.5;
-export const AIM_LINE_COLOR_RGBA    = "rgba(255, 255, 255, 0.55)";
+export const AIM_LINE_LENGTH_SCALE   = 1.5;  // at velocity 100, the line is 150px
+export const AIM_LINE_DOT_COUNT      = 12;
+export const AIM_LINE_DOT_RADIUS     = 2.5;
+export const AIM_LINE_COLOR_RGBA     = "rgba(255, 255, 255, 0.55)";
+export const AIM_LINE_MIN_VELOCITY   = 40;   // minimum display length while angle is cycling
 
 // Hint text shown under the HUD during a player's turn.
-export const HINT_TEXT  = "↑↓ angle   ←→ power   SHIFT for ×5   SPACE to throw";
+export const HINT_TEXT  = "SPACE to lock angle   SPACE to fire   S: super bomb";
 export const HINT_COLOR = "#888888";
 
 // Explosion animation — sizes, timing, and colours.
-export const EXPLOSION_CRATER_RADIUS   = 24;   // how big the hole in the building is
-export const EXPLOSION_DRAW_RADIUS     = 38;   // how big the visible flash is (building hit)
-export const EXPLOSION_BIG_DRAW_RADIUS = 64;   // how big the flash is when a character is hit
-export const EXPLOSION_DURATION_MS     = 450;  // how long before the explosion fades out
+export const EXPLOSION_CRATER_RADIUS   = 32;   // how big the hole in the building is
+export const EXPLOSION_DRAW_RADIUS     = 50;   // how big the visible flash is (building hit)
+export const EXPLOSION_BIG_DRAW_RADIUS = 100;   // how big the flash is when a character is hit
+export const EXPLOSION_DURATION_MS     = 750;  // how long before the explosion fades out
+
+// Super bomb — one use per player per round, loaded with the S key.
+export const SUPER_BOMB_CRATER_RADIUS       = 80;          // much wider building crater
+export const SUPER_BOMB_DRAW_RADIUS         = 200;         // bigger fireball
+export const SUPER_BOMB_INDICATOR_COLOR     = "#ff9944";   // indicator when available
+export const SUPER_BOMB_INDICATOR_ARMED_COLOR = "#ff1144"; // indicator when armed
+
+// Super bomb projectile appearance.
+export const SUPER_BOMB_PROJECTILE_RADIUS = 12;            // bigger than the normal 6px
+export const SUPER_BOMB_PROJECTILE_COLOR  = "#ff2222";     // vivid red
 // Colours run from the bright centre to the dark edge — like a real fireball.
 export const EXPLOSION_COLORS = ["#fff8c0", "#ffd84d", "#ff8c42", "#c94d2c"];
 
 // Extra pixels of padding added around a character's hit box.
 // Slightly bigger = more "near-miss" forgiveness for younger players.
-export const CHARACTER_HIT_PADDING = 10;
+export const CHARACTER_HIT_PADDING = 6;
 
 // When sampling a pixel from the city canvas, alpha above this value means "solid building".
 export const BUILDING_HIT_ALPHA_THRESHOLD = 200;
@@ -142,25 +147,35 @@ export const MATCH_WIN_THRESHOLD = 3;
 export const ROUND_END_BANNER_DURATION_MS = 2200;
 
 // The banner that pops up when someone wins a round or the whole match.
-export const BANNER_BG_RGBA        = "rgba(0, 0, 0, 0.65)";
+export const BANNER_BG_RGBA        = "rgba(5, 0, 25, 0.88)";
 export const BANNER_HEIGHT         = 160;
-export const BANNER_TITLE_FONT     = 'bold 44px "Courier New", monospace';
-export const BANNER_SUBTITLE_FONT  = '24px "Courier New", monospace';
+export const BANNER_TITLE_FONT     = 'bold 52px system-ui, sans-serif';
+export const BANNER_SUBTITLE_FONT  = '22px system-ui, sans-serif';
 export const BANNER_TITLE_COLOR    = "#ffffff";
 export const BANNER_SUBTITLE_COLOR = "#dddddd";
 
 // The round-win scoreboard shown inside the wind bar.
-export const SCOREBOARD_FONT     = 'bold 22px "Courier New", monospace';
+export const SCOREBOARD_FONT     = 'bold 16px system-ui, sans-serif';
 export const SCOREBOARD_MARGIN_X = 16;
 
 // All the colours used in the game.
 export const COLORS = {
-  sky:    "#0d0d1a",
-  title:  "#ffffff",
-  border: "#ffffff",
+  skyTop:    "#0e0020",  // deep purple at the top
+  skyBottom: "#050514",  // near-black blue at the horizon
+  title:     "#ffffff",
+  border:    "#ffffff",
 };
 
+// Which game mode is active.
+// SEQUENTIAL = players take turns (classic mode)
+// PARALLEL   = both players fire simultaneously with their own keys
+export const GameMode = Object.freeze({
+  SEQUENTIAL: "SEQUENTIAL",
+  PARALLEL:   "PARALLEL",
+});
+
 // GameState lists every possible screen or phase the game can be in.
+// CHARACTER_SELECT  = both players pick their character before the match
 // TITLE             = the title screen (wired up in a later phase)
 // PLAYER_TURN       = a player is choosing their angle and velocity
 // RESOLVING         = a throw is in the air
@@ -168,6 +183,7 @@ export const COLORS = {
 // ROUND_END_BANNER  = round-win banner is showing before the next round
 // MATCH_END         = one player has won the whole match; freeze until R
 export const GameState = Object.freeze({
+  CHARACTER_SELECT: "CHARACTER_SELECT",
   TITLE:            "TITLE",
   PLAYER_TURN:      "PLAYER_TURN",
   RESOLVING:        "RESOLVING",
