@@ -278,36 +278,45 @@ export function drawHint(ctx) {
   ctx.fillText(HINT_TEXT, 10, WIND_BAR_HEIGHT + 40);
 }
 
-// Draw super bomb availability indicators below each player's score pill.
-// P1's indicator sits on the left, P2's on the right.
+// Super bomb button dimensions — mirrored in game.js for hit detection.
+export const SB_BTN_W = 200;
+export const SB_BTN_H = 28;
+export const SB_BTN_Y = WIND_BAR_HEIGHT + 8;
+
+// Draw super bomb availability as tappable buttons below each score pill.
 // superBombArmed may be a boolean (sequential) or [bool, bool] (parallel).
 export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, activePlayerIndex) {
-  const y = WIND_BAR_HEIGHT + 22;
-
   function isArmed(playerIndex) {
     if (Array.isArray(superBombArmed)) return superBombArmed[playerIndex];
     return superBombArmed && playerIndex === activePlayerIndex;
   }
 
-  function drawIndicator(playerIndex, align, keyLabel) {
+  function drawIndicator(playerIndex, btnX, keyLabel) {
     if (!superBombAvailable[playerIndex]) return;
 
-    const armed  = isArmed(playerIndex);
-    const color  = armed ? SUPER_BOMB_INDICATOR_ARMED_COLOR : SUPER_BOMB_INDICATOR_COLOR;
-    const label  = armed ? "[ SUPER BOMB ARMED ]" : `[ ${keyLabel} ] SUPER BOMB`;
-    const x      = align === "left" ? SCOREBOARD_MARGIN_X : CANVAS_WIDTH - SCOREBOARD_MARGIN_X;
+    const armed = isArmed(playerIndex);
+    const color = armed ? SUPER_BOMB_INDICATOR_ARMED_COLOR : SUPER_BOMB_INDICATOR_COLOR;
+    const label = armed ? "SUPER BOMB ARMED" : `[${keyLabel}] SUPER BOMB`;
 
     ctx.save();
+    ctx.fillStyle   = `${color}22`;
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(btnX, SB_BTN_Y, SB_BTN_W, SB_BTN_H, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
     ctx.font         = "bold 12px 'Courier New', monospace";
     ctx.fillStyle    = color;
-    ctx.textAlign    = align;
-    ctx.textBaseline = "top";
-    ctx.fillText(label, x, y);
-    ctx.restore();
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, btnX + SB_BTN_W / 2, SB_BTN_Y + SB_BTN_H / 2);
   }
 
-  drawIndicator(0, "left",  "S");
-  drawIndicator(1, "right", "L");
+  drawIndicator(0, SCOREBOARD_MARGIN_X,                        "S");
+  drawIndicator(1, CANVAS_WIDTH - SCOREBOARD_MARGIN_X - SB_BTN_W, "L");
 }
 
 // Draw the downward-pointing triangle that bobs above the active character.

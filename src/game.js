@@ -24,7 +24,7 @@ import {
 } from "./config.js";
 import { generateWorld, carveCrater } from "./world.js";
 import { getLaunchPoint, launchVelocity, stepProjectile, isOffScreen, hitsCity, hitsCharacter } from "./physics.js";
-import { drawScene, drawCharacterSelect } from "./render.js";
+import { drawScene, drawCharacterSelect, SB_BTN_W, SB_BTN_H, SB_BTN_Y } from "./render.js";
 import { setupInput, setAim, getAim, setInputEnabled, setActivePlayer } from "./input.js";
 import { CHARACTERS } from "./characters.js";
 import { playSound } from "./sound.js";
@@ -471,14 +471,53 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // In-game: tap near a character to fire in parallel mode
-    if (currentState === GameState.PLAYER_TURN && gameMode === GameMode.PARALLEL && !parallelRoundOver) {
+    if (currentState === GameState.PLAYER_TURN) {
       event.preventDefault();
-      for (let p = 0; p < 2; p++) {
-        const ch = world.characters[p];
-        if (Math.hypot(cx - (ch.x + ch.width / 2), cy - (ch.y + ch.height / 2)) < 80) {
-          handleParallelShift(p);
-          break;
+
+      // Super bomb buttons (top bar)
+      if (cy >= SB_BTN_Y && cy <= SB_BTN_Y + SB_BTN_H) {
+        const p1BtnX = 16; // SCOREBOARD_MARGIN_X
+        const p2BtnX = CANVAS_WIDTH - 16 - SB_BTN_W;
+
+        if (cx >= p1BtnX && cx <= p1BtnX + SB_BTN_W) {
+          if (gameMode === GameMode.PARALLEL) {
+            if (!parallelRoundOver && superBombAvailable[0] && par[0].canFire && !par[0].isArmUp && par[0].projectile === null) {
+              par[0].superBombArmed = !par[0].superBombArmed;
+              playSound(par[0].superBombArmed ? "superBombArm" : "superBombDisarm");
+              redraw();
+            }
+          } else if (activePlayerIndex === 0 && superBombAvailable[0] && !isArmUp) {
+            superBombArmed = !superBombArmed;
+            playSound(superBombArmed ? "superBombArm" : "superBombDisarm");
+            redraw();
+          }
+          return;
+        }
+
+        if (cx >= p2BtnX && cx <= p2BtnX + SB_BTN_W) {
+          if (gameMode === GameMode.PARALLEL) {
+            if (!parallelRoundOver && superBombAvailable[1] && par[1].canFire && !par[1].isArmUp && par[1].projectile === null) {
+              par[1].superBombArmed = !par[1].superBombArmed;
+              playSound(par[1].superBombArmed ? "superBombArm" : "superBombDisarm");
+              redraw();
+            }
+          } else if (activePlayerIndex === 1 && superBombAvailable[1] && !isArmUp) {
+            superBombArmed = !superBombArmed;
+            playSound(superBombArmed ? "superBombArm" : "superBombDisarm");
+            redraw();
+          }
+          return;
+        }
+      }
+
+      // Parallel mode: tap near a character to aim/fire
+      if (gameMode === GameMode.PARALLEL && !parallelRoundOver) {
+        for (let p = 0; p < 2; p++) {
+          const ch = world.characters[p];
+          if (Math.hypot(cx - (ch.x + ch.width / 2), cy - (ch.y + ch.height / 2)) < 80) {
+            handleParallelShift(p);
+            break;
+          }
         }
       }
     }
