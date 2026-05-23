@@ -317,6 +317,14 @@ export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed,
 
   drawIndicator(0, SCOREBOARD_MARGIN_X,                        "S");
   drawIndicator(1, CANVAS_WIDTH - SCOREBOARD_MARGIN_X - SB_BTN_W, "L");
+
+  const hintY = SB_BTN_Y + SB_BTN_H + 10;
+  ctx.font         = "bold 11px system-ui, sans-serif";
+  ctx.fillStyle    = "#ffffff";
+  ctx.textBaseline = "top";
+  ctx.textAlign    = "center";
+  ctx.fillText("LEFT SHIFT KEY FIRES", SCOREBOARD_MARGIN_X + SB_BTN_W / 2, hintY);
+  ctx.fillText("RIGHT SHIFT KEY FIRES", CANVAS_WIDTH - SCOREBOARD_MARGIN_X - SB_BTN_W / 2, hintY);
 }
 
 // Draw the downward-pointing triangle that bobs above the active character.
@@ -391,6 +399,14 @@ export function drawRoundBanner(ctx, winnerIndex, roundWinsByPlayer, playerNames
   });
 }
 
+// Bounds of the "New Game" button — exported so game.js can do hit detection.
+export const NEW_GAME_BTN = {
+  w: 280,
+  h: 56,
+  get x() { return CANVAS_WIDTH  / 2 - this.w / 2; },
+  get y() { return CANVAS_HEIGHT / 2 + BANNER_HEIGHT / 2 + 24; },
+};
+
 // Show who won the entire match and prompt for a rematch.
 export function drawMatchBanner(ctx, winnerIndex, roundWinsByPlayer, playerNames = ["Player 1", "Player 2"]) {
   const name  = playerNames[winnerIndex].toUpperCase();
@@ -402,6 +418,24 @@ export function drawMatchBanner(ctx, winnerIndex, roundWinsByPlayer, playerNames
     subtitle:   `${w0} — ${w1}`,
     titleColor: color,
   });
+
+  const { x, y, w, h } = NEW_GAME_BTN;
+
+  ctx.save();
+  ctx.fillStyle   = "rgba(255,255,255,0.10)";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 10);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.font         = "bold 20px system-ui, sans-serif";
+  ctx.fillStyle    = "#ffffff";
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("NEW GAME", CANVAS_WIDTH / 2, y + h / 2);
 }
 
 // Draw the character selection screen.

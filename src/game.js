@@ -24,7 +24,7 @@ import {
 } from "./config.js";
 import { generateWorld, carveCrater } from "./world.js";
 import { getLaunchPoint, launchVelocity, stepProjectile, isOffScreen, hitsCity, hitsCharacter } from "./physics.js";
-import { drawScene, drawCharacterSelect, SB_BTN_W, SB_BTN_H, SB_BTN_Y } from "./render.js";
+import { drawScene, drawCharacterSelect, SB_BTN_W, SB_BTN_H, SB_BTN_Y, NEW_GAME_BTN } from "./render.js";
 import { setupInput, setAim, getAim, setInputEnabled, setActivePlayer } from "./input.js";
 import { CHARACTERS } from "./characters.js";
 import { playSound } from "./sound.js";
@@ -380,6 +380,12 @@ window.addEventListener("DOMContentLoaded", () => {
   setupInput({ onSpacePress: handleSpacePress });
 
   window.addEventListener("keydown", (event) => {
+    if (currentState === GameState.MATCH_END && event.key === "Enter") {
+      event.preventDefault();
+      resetMatch();
+      return;
+    }
+
     if (currentState === GameState.CHARACTER_SELECT) {
       if (charSelectPhase === 2) {
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -463,6 +469,16 @@ window.addEventListener("DOMContentLoaded", () => {
     const scaleY = canvas.height / rect.height;
     const cx     = (event.clientX - rect.left) * scaleX;
     const cy     = (event.clientY - rect.top)  * scaleY;
+
+    // Match end — new game button
+    if (currentState === GameState.MATCH_END) {
+      const { x, y, w, h } = NEW_GAME_BTN;
+      if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
+        event.preventDefault();
+        resetMatch();
+      }
+      return;
+    }
 
     // Character select screen
     if (currentState === GameState.CHARACTER_SELECT && charSelectPhase < 2) {
