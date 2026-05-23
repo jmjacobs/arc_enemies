@@ -30,8 +30,9 @@ import { CHARACTERS } from "./characters.js";
 import { playSound } from "./sound.js";
 
 window.addEventListener("DOMContentLoaded", () => {
-  const canvas = document.getElementById("game");
-  const ctx    = canvas.getContext("2d");
+  const canvas    = document.getElementById("game");
+  const ctx       = canvas.getContext("2d");
+  const nameInput = document.getElementById("name-input");
 
   canvas.width  = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
@@ -46,7 +47,7 @@ window.addEventListener("DOMContentLoaded", () => {
   let charPreview     = [0, 0];
   let playerNames     = ["Player 1", "Player 2"];
   let charNameInput   = "";
-  let gameModeIndex   = 0;   // 0 = SEQUENTIAL, 1 = PARALLEL
+  let gameModeIndex   = 1;   // 0 = SEQUENTIAL, 1 = PARALLEL
 
   let activePlayerIndex       = 0;
   let roundWinner             = -1;
@@ -241,6 +242,75 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // ── Character select helpers ────────────────────────────────────────────────
+
+  // Shared confirm logic — called by Enter key, confirm button tap, and name input Enter.
+  function confirmCharSelect() {
+    playerNames[charSelectPhase] = charNameInput.trim() || `Player ${charSelectPhase + 1}`;
+    charNameInput   = "";
+    nameInput.value = "";
+    nameInput.blur();
+    if (charSelectPhase < 1) {
+      charSelectPhase++;
+      playSound("confirm");
+      redraw();
+    } else {
+      playSound("confirm");
+      startGame();
+    }
+  }
+
+  // Thumbnail and button hit detection for pointer events on the select screen.
+  function handleCharSelectPointer(cx, cy) {
+    // Thumbnail row — same positions as render.js
+    const thumbW = 56, thumbH = 64, gap = 32;
+    const totalW = CHARACTERS.length * thumbW + (CHARACTERS.length - 1) * gap;
+    const rowX   = (CANVAS_WIDTH - totalW) / 2;
+    const rowY   = 146;
+
+    for (let i = 0; i < CHARACTERS.length; i++) {
+      const tx = rowX + i * (thumbW + gap);
+      if (cx >= tx - 8 && cx <= tx + thumbW + 8 && cy >= rowY - 8 && cy <= rowY + thumbH + 8) {
+        charPreview[charSelectPhase] = i;
+        playSound("navigate");
+        redraw();
+        return;
+      }
+    }
+
+    // Name input box — focus hidden input so the mobile keyboard appears
+    const pvY  = 260, pvH = 128;
+    const boxW = 480, boxH = 44;
+    const boxX = CANVAS_WIDTH / 2 - boxW / 2;
+    const boxY = pvY + pvH + 136;
+    if (cx >= boxX && cx <= boxX + boxW && cy >= boxY && cy <= boxY + boxH) {
+      nameInput.value = charNameInput;
+      nameInput.focus();
+      return;
+    }
+
+    // Confirm button — same dimensions as drawn in render.js
+    const btnW = 260, btnH = 52;
+    const btnX = CANVAS_WIDTH / 2 - btnW / 2;
+    const btnY = boxY + boxH + 18;
+    if (cx >= btnX && cx <= btnX + btnW && cy >= btnY && cy <= btnY + btnH) {
+      confirmCharSelect();
+    }
+  }
+
+  // Sync the hidden input's text into charNameInput (handles mobile keyboard typing).
+  nameInput.addEventListener("input", () => {
+    let val = nameInput.value.slice(0, 14);
+    if (val.length >= 1) val = val[0].toUpperCase() + val.slice(1);
+    if (nameInput.value !== val) nameInput.value = val;
+    charNameInput = val;
+    redraw();
+  });
+
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); confirmCharSelect(); }
+  });
+
   // ── Game flow ───────────────────────────────────────────────────────────────
   function startGame() {
     gameMode = gameModeIndex === 0 ? GameMode.SEQUENTIAL : GameMode.PARALLEL;
@@ -344,15 +414,7 @@ window.addEventListener("DOMContentLoaded", () => {
         redraw();
       } else if (event.key === "Enter") {
         event.preventDefault();
-        playerNames[charSelectPhase] = charNameInput.trim() || `Player ${charSelectPhase + 1}`;
-        charNameInput = "";
-        if (charSelectPhase < 1) {
-          charSelectPhase++;
-        } else {
-          charSelectPhase = 2;
-        }
-        playSound("confirm");
-        redraw();
+        confirmCharSelect();
       } else if (event.key.length === 1 && charNameInput.length < 14) {
         const ch = charNameInput.length === 0 ? event.key.toUpperCase() : event.key;
         charNameInput += ch;
@@ -393,6 +455,34 @@ window.addEventListener("DOMContentLoaded", () => {
       redraw();
     }
   });
+
+  // ── Pointer input (mouse + touch) ───────────────────────────────────────────
+  canvas.addEventListener("pointerdown", (event) => {
+    const rect   = canvas.getBoundingClientRect();
+    const scaleX = canvas.width  / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const cx     = (event.clientX - rect.left) * scaleX;
+    const cy     = (event.clientY - rect.top)  * scaleY;
+
+    // Character select screen
+    if (currentState === GameState.CHARACTER_SELECT && charSelectPhase < 2) {
+      event.preventDefault();
+      handleCharSelectPointer(cx, cy);
+      return;
+    }
+
+    // In-game: tap near a character to fire in parallel mode
+    if (currentState === GameState.PLAYER_TURN && gameMode === GameMode.PARALLEL && !parallelRoundOver) {
+      event.preventDefault();
+      for (let p = 0; p < 2; p++) {
+        const ch = world.characters[p];
+        if (Math.hypot(cx - (ch.x + ch.width / 2), cy - (ch.y + ch.height / 2)) < 80) {
+          handleParallelShift(p);
+          break;
+        }
+      }
+    }
+  }, { passive: false });
 
   // ── Animation loop ──────────────────────────────────────────────────────────
   let lastTime = null;

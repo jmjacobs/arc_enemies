@@ -598,6 +598,25 @@ export function drawCharacterSelect(ctx, { charSelectPhase, charPreview, playerN
     ctx.fillStyle = "rgba(255,255,255,0.25)";
     ctx.fillText("Enter your name...", boxX + 16, boxY + boxH / 2);
   }
+
+  // Confirm button
+  const btnW = 260, btnH = 52;
+  const btnX = CANVAS_WIDTH / 2 - btnW / 2;
+  const btnY = boxY + boxH + 18;
+  ctx.save();
+  ctx.fillStyle   = `${color}33`;
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.roundRect(btnX, btnY, btnW, btnH, 8);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  ctx.font         = "bold 18px system-ui, sans-serif";
+  ctx.fillStyle    = color;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("CONFIRM  ▶", CANVAS_WIDTH / 2, btnY + btnH / 2);
 }
 
 // Draw the full scene every frame.

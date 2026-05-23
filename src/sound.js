@@ -81,103 +81,49 @@ function playThrowSuper() {
   osc.start(now); osc.stop(now + 0.38);
 }
 
-// Three separated layers: sharp crack, mid body, low rumble.
-// Keeping them independent stops them muddying each other.
+// Pure shaped noise — no oscillators. All character comes from the envelope.
+// Fast attack spike → brief punch → smooth tail.
 function playExplosion() {
   const c   = getCtx();
   const now = c.currentTime;
 
-  // Layer 1 — crack: highpass noise, gone in ~0.08 s
-  const crack  = c.createBufferSource();
-  crack.buffer = getNoise();
-  const crackF = c.createBiquadFilter();
-  crackF.type  = "highpass";
-  crackF.frequency.value = 1000;
-  const crackG = c.createGain();
-  crackG.gain.setValueAtTime(1.2, now);
-  crackG.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-  crack.connect(crackF); crackF.connect(crackG); crackG.connect(c.destination);
-  crack.start(now); crack.stop(now + 0.10);
+  const src  = c.createBufferSource();
+  src.buffer = getNoise();
 
-  // Layer 2 — body: bandpass noise, fades over ~0.28 s
-  const body  = c.createBufferSource();
-  body.buffer = getNoise();
-  const bodyF = c.createBiquadFilter();
-  bodyF.type  = "bandpass";
-  bodyF.frequency.value = 320;
-  bodyF.Q.value = 0.8;
-  const bodyG = c.createGain();
-  bodyG.gain.setValueAtTime(0.65, now);
-  bodyG.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
-  body.connect(bodyF); bodyF.connect(bodyG); bodyG.connect(c.destination);
-  body.start(now); body.stop(now + 0.30);
+  const filter = c.createBiquadFilter();
+  filter.type  = "lowpass";
+  filter.frequency.value = 1000;
 
-  // Layer 3 — rumble: sine sweep 80 → 22 Hz, lingers ~0.5 s
-  const rumble = c.createOscillator();
-  rumble.type  = "sine";
-  rumble.frequency.setValueAtTime(80, now);
-  rumble.frequency.exponentialRampToValueAtTime(22, now + 0.48);
-  const rumbleG = c.createGain();
-  rumbleG.gain.setValueAtTime(0.9, now);
-  rumbleG.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
-  rumble.connect(rumbleG); rumbleG.connect(c.destination);
-  rumble.start(now); rumble.stop(now + 0.52);
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0,    now);
+  gain.gain.linearRampToValueAtTime(1.0,  now + 0.002);  // 2ms attack
+  gain.gain.setValueAtTime(0.80, now + 0.022);            // punch plateau
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+
+  src.connect(filter); filter.connect(gain); gain.connect(c.destination);
+  src.start(now); src.stop(now + 0.38);
 }
 
-// Super version: same three layers but louder, deeper, and longer,
-// plus a delayed secondary crack that lands after the initial hit.
+// Super version — darker filter, harder hit, longer tail.
 function playExplosionSuper() {
   const c   = getCtx();
   const now = c.currentTime;
 
-  // Layer 1 — crack
-  const crack  = c.createBufferSource();
-  crack.buffer = getNoise();
-  const crackF = c.createBiquadFilter();
-  crackF.type  = "highpass";
-  crackF.frequency.value = 800;
-  const crackG = c.createGain();
-  crackG.gain.setValueAtTime(1.8, now);
-  crackG.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-  crack.connect(crackF); crackF.connect(crackG); crackG.connect(c.destination);
-  crack.start(now); crack.stop(now + 0.14);
+  const src  = c.createBufferSource();
+  src.buffer = getNoise();
 
-  // Layer 2 — body
-  const body  = c.createBufferSource();
-  body.buffer = getNoise();
-  const bodyF = c.createBiquadFilter();
-  bodyF.type  = "bandpass";
-  bodyF.frequency.value = 200;
-  bodyF.Q.value = 0.6;
-  const bodyG = c.createGain();
-  bodyG.gain.setValueAtTime(1.0, now);
-  bodyG.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
-  body.connect(bodyF); bodyF.connect(bodyG); bodyG.connect(c.destination);
-  body.start(now); body.stop(now + 0.52);
+  const filter = c.createBiquadFilter();
+  filter.type  = "lowpass";
+  filter.frequency.value = 600;
 
-  // Layer 3 — deep rumble
-  const rumble = c.createOscillator();
-  rumble.type  = "sine";
-  rumble.frequency.setValueAtTime(60, now);
-  rumble.frequency.exponentialRampToValueAtTime(14, now + 0.85);
-  const rumbleG = c.createGain();
-  rumbleG.gain.setValueAtTime(1.4, now);
-  rumbleG.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
-  rumble.connect(rumbleG); rumbleG.connect(c.destination);
-  rumble.start(now); rumble.stop(now + 0.88);
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0,    now);
+  gain.gain.linearRampToValueAtTime(1.6,  now + 0.002);  // harder hit
+  gain.gain.setValueAtTime(1.25, now + 0.030);            // longer punch
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.70);
 
-  // Layer 4 — delayed secondary crack at +0.14 s
-  const crack2  = c.createBufferSource();
-  crack2.buffer = getNoise();
-  const f2 = c.createBiquadFilter();
-  f2.type  = "bandpass";
-  f2.frequency.value = 600;
-  f2.Q.value = 0.5;
-  const g2 = c.createGain();
-  g2.gain.setValueAtTime(0.8, now + 0.14);
-  g2.gain.exponentialRampToValueAtTime(0.001, now + 0.40);
-  crack2.connect(f2); f2.connect(g2); g2.connect(c.destination);
-  crack2.start(now + 0.14); crack2.stop(now + 0.42);
+  src.connect(filter); filter.connect(gain); gain.connect(c.destination);
+  src.start(now); src.stop(now + 0.75);
 }
 
 // Short ascending arpeggio — C5 · E5 · G5.
