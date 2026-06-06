@@ -21,15 +21,20 @@ import {
   ROUND_END_BANNER_DURATION_MS,
   SUPER_BOMB_CRATER_RADIUS,
   SUPER_BOMB_DRAW_RADIUS,
+  TUNNEL_BOMB_TUNNEL_RADIUS,
+  TUNNEL_BOMB_DRAW_RADIUS,
+  TUNNEL_BOMB_MAX_DRILL_PX,
+  TUNNEL_BOMB_DRILL_SPEED_FACTOR,
   THEMES,
   MAX_HP,
+  RELOAD_COOLDOWN_MS,
 } from "./config.js";
 import { generateWorld, carveCrater } from "./world.js";
 import { getLaunchPoint, launchVelocity, stepProjectile, isOffScreen, hitsCity, hitsCharacter } from "./physics.js";
 import { drawScene, drawCharacterSelect, SB_BTN_W, SB_BTN_H, SB_BTN_Y, NEW_GAME_BTN, triggerShake } from "./render.js";
 import { setupInput, setAim, getAim, setInputEnabled, setActivePlayer } from "./input.js";
 import { CHARACTERS } from "./characters.js";
-import { playSound } from "./sound.js";
+import { playSound, startDrillSound, stopDrillSound } from "./sound.js";
 
 window.addEventListener("DOMContentLoaded", () => {
   const canvas    = document.getElementById("game");
@@ -53,6 +58,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   let roundIndex              = 0;
   let hp                      = [MAX_HP, MAX_HP];
+  let tunnelBombAvailable     = [true, true];
   let activePlayerIndex       = 0;
   let roundWinner             = -1;
   let roundWinsByPlayer       = [0, 0];
@@ -62,11 +68,14 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // ── Sequential-only state ───────────────────────────────────────────────────
   let throwingPlayerIndex = 0;
-  let projectile          = null;
+  let projectiles         = [];    // all in-flight projectiles this turn
+  let seqExplosions       = [];    // all active explosion animations
+  let seqReloadAt         = null;  // performance.now() timestamp when player may fire again
+  let seqAimingForReload  = false; // true when cooldown expired, player re-aiming mid-RESOLVING
   let isArmUp             = false;
   let armUpTimer          = null;
-  let explosion           = null;
   let superBombArmed      = false;
+  let tunnelBombArmed     = false;
   let cyclePhase          = 'angle';
   let cycleStartTime      = null;
   let lockedAngle         = 0;
@@ -79,10 +88,12 @@ window.addEventListener("DOMContentLoaded", () => {
     aim:            { angle: 0, velocity: AIM_LINE_MIN_VELOCITY },
     isArmUp:        false,
     armUpTimer:     null,
-    projectile:     null,
-    explosion:      null,
-    superBombArmed: false,
-    canFire:        true,
+    projectiles:    [],   // all in-flight projectiles for this player
+    explosions:     [],   // all active explosion animations for this player
+    reloadAt:       0,    // performance.now() timestamp when canFire becomes true
+    superBombArmed:  false,
+    tunnelBombArmed: false,
+    canFire:         true,
   });
   let par               = [parInit(), parInit()];
   let parallelRoundOver = false;
@@ -112,13 +123,13 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (gameMode === GameMode.PARALLEL) {
       const parallelData = {
-        projectiles: [par[0].projectile, par[1].projectile],
-        explosions:  [par[0].explosion,  par[1].explosion],
-        aims:        [par[0].aim,        par[1].aim],
-        isArmUp:     [par[0].isArmUp,   par[1].isArmUp],
+        projectiles: [par[0].projectiles, par[1].projectiles],
+        explosions:  [par[0].explosions,  par[1].explosions],
+        aims:        [par[0].aim,         par[1].aim],
+        isArmUp:     [par[0].isArmUp,    par[1].isArmUp],
         showAimLine: [
-          par[0].canFire && !par[0].isArmUp && par[0].projectile === null && !parallelRoundOver,
-          par[1].canFire && !par[1].isArmUp && par[1].projectile === null && !parallelRoundOver,
+          par[0].canFire && !par[0].isArmUp && !parallelRoundOver,
+          par[1].canFire && !par[1].isArmUp && !parallelRoundOver,
         ],
         canFire: [par[0].canFire, par[1].canFire],
       };
@@ -127,7 +138,9 @@ window.addEventListener("DOMContentLoaded", () => {
         roundBannerWinner: currentState === GameState.ROUND_END_BANNER ? roundWinner        : -1,
         matchBannerWinner: currentState === GameState.MATCH_END        ? (matchWinner ?? -1) : -1,
         superBombAvailable,
-        superBombArmed:    [par[0].superBombArmed, par[1].superBombArmed],
+        superBombArmed:    [par[0].superBombArmed,  par[1].superBombArmed],
+        tunnelBombAvailable,
+        tunnelBombArmed:   [par[0].tunnelBombArmed, par[1].tunnelBombArmed],
         playerNames,
         parallelData,
         hp,
@@ -135,36 +148,60 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const isPlayerTurn = currentState === GameState.PLAYER_TURN && !isArmUp;
+    const isPlayerTurn  = currentState === GameState.PLAYER_TURN && !isArmUp;
+    const canAimReload  = seqAimingForReload && !isArmUp;
     drawScene(ctx, world, activePlayerIndex, timeMs, {
-      projectile,
+      projectiles,
       throwingPlayerIndex,
       isArmUp,
       aim:               getAim(),
-      showAimLine:       isPlayerTurn,
-      showHint:          isPlayerTurn,
-      explosion,
+      showAimLine:       isPlayerTurn || canAimReload,
+      showHint:          isPlayerTurn || canAimReload,
+      seqExplosions,
       roundWinsByPlayer,
       roundBannerWinner: currentState === GameState.ROUND_END_BANNER ? roundWinner        : -1,
       matchBannerWinner: currentState === GameState.MATCH_END        ? (matchWinner ?? -1) : -1,
       superBombAvailable,
       superBombArmed,
+      tunnelBombAvailable,
+      tunnelBombArmed,
       playerNames,
       hp,
     });
   }
 
+  // Returns the next armed state when cycling through bomb types.
+  // Order: normal → super (if avail) → tunnel (if avail) → normal.
+  function cycleBomb(superAvail, tunnelAvail, superArmed, tunnelArmed) {
+    if (superArmed) {
+      if (tunnelAvail) return { superArmed: false, tunnelArmed: true,  sound: "superBombArm"    };
+      return                  { superArmed: false, tunnelArmed: false, sound: "superBombDisarm" };
+    }
+    if (tunnelArmed) {
+      return                  { superArmed: false, tunnelArmed: false, sound: "superBombDisarm" };
+    }
+    if (superAvail)  return   { superArmed: true,  tunnelArmed: false, sound: "superBombArm"    };
+    if (tunnelAvail) return   { superArmed: false,  tunnelArmed: true, sound: "superBombArm"    };
+    return                    { superArmed: false, tunnelArmed: false, sound: null };
+  }
+
   // ── Sequential functions ────────────────────────────────────────────────────
   function handleThrow({ angle, velocity }) {
-    const isSuperBomb = superBombArmed;
+    const isSuperBomb  = superBombArmed;
+    const isTunnelBomb = tunnelBombArmed;
     playSound(isSuperBomb ? "throwSuper" : "throw");
-    superBombArmed = false;
-    if (isSuperBomb) superBombAvailable[activePlayerIndex] = false;
+    superBombArmed      = false;
+    tunnelBombArmed     = false;
+    seqAimingForReload  = false;
+    if (isSuperBomb)  superBombAvailable[activePlayerIndex]  = false;
+    if (isTunnelBomb) tunnelBombAvailable[activePlayerIndex] = false;
 
     setInputEnabled(false);
-    currentState        = GameState.RESOLVING;
-    throwingPlayerIndex = activePlayerIndex;
-    isArmUp             = true;
+    if (currentState !== GameState.RESOLVING) {
+      throwingPlayerIndex = activePlayerIndex;
+      currentState        = GameState.RESOLVING;
+    }
+    isArmUp = true;
 
     armUpTimer = setTimeout(() => {
       armUpTimer = null;
@@ -173,24 +210,31 @@ window.addEventListener("DOMContentLoaded", () => {
       const facing    = character.facingRight ? 1 : -1;
       const { x: launchX, y: launchY } = getLaunchPoint(character);
       const { vx, vy } = launchVelocity(angle, velocity, facing);
-      projectile = { x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb };
+      projectiles.push({ x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb, isTunnelBomb, drillPx: 0 });
+      seqReloadAt = performance.now() + RELOAD_COOLDOWN_MS;
     }, ARM_UP_DURATION_MS);
   }
 
   function nextTurn() {
-    superBombArmed    = false;
-    cyclePhase        = 'angle';
-    cycleStartTime    = null;
-    lockedAngle       = 0;
-    activePlayerIndex = activePlayerIndex === 0 ? 1 : 0;
-    currentState      = GameState.PLAYER_TURN;
+    superBombArmed      = false;
+    tunnelBombArmed     = false;
+    cyclePhase          = 'angle';
+    cycleStartTime      = null;
+    lockedAngle         = 0;
+    projectiles         = [];
+    seqExplosions       = [];
+    seqReloadAt         = null;
+    seqAimingForReload  = false;
+    activePlayerIndex   = activePlayerIndex === 0 ? 1 : 0;
+    currentState        = GameState.PLAYER_TURN;
     setInputEnabled(true);
     setActivePlayer(activePlayerIndex);
   }
 
   function handleSpacePress() {
-    if (currentState !== GameState.PLAYER_TURN || isArmUp) return;
     if (gameMode === GameMode.PARALLEL) return;
+    const canAct = (currentState === GameState.PLAYER_TURN || (currentState === GameState.RESOLVING && seqAimingForReload)) && !isArmUp;
+    if (!canAct) return;
     if (cyclePhase === 'angle') {
       lockedAngle    = Math.round(getAim().angle);
       cyclePhase     = 'velocity';
@@ -211,9 +255,12 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function fireParallelProjectile(p, angle, velocity) {
-    const isSuperBomb = par[p].superBombArmed;
-    par[p].superBombArmed = false;
-    if (isSuperBomb) superBombAvailable[p] = false;
+    const isSuperBomb  = par[p].superBombArmed;
+    const isTunnelBomb = par[p].tunnelBombArmed;
+    par[p].superBombArmed  = false;
+    par[p].tunnelBombArmed = false;
+    if (isSuperBomb)  superBombAvailable[p]  = false;
+    if (isTunnelBomb) tunnelBombAvailable[p] = false;
 
     playSound(isSuperBomb ? "throwSuper" : "throw");
     par[p].canFire = false;
@@ -226,13 +273,14 @@ window.addEventListener("DOMContentLoaded", () => {
       const facing    = character.facingRight ? 1 : -1;
       const { x: launchX, y: launchY } = getLaunchPoint(character);
       const { vx, vy } = launchVelocity(angle, velocity, facing);
-      par[p].projectile = { x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb };
+      par[p].projectiles.push({ x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb, isTunnelBomb, drillPx: 0 });
+      par[p].reloadAt = performance.now() + RELOAD_COOLDOWN_MS;
     }, ARM_UP_DURATION_MS);
   }
 
   function handleParallelShift(p) {
     if (currentState !== GameState.PLAYER_TURN || parallelRoundOver) return;
-    if (!par[p].canFire || par[p].isArmUp || par[p].projectile !== null) return;
+    if (!par[p].canFire || par[p].isArmUp) return;
 
     if (par[p].cyclePhase === 'angle') {
       par[p].lockedAngle    = Math.round(par[p].aim.angle);
@@ -341,15 +389,23 @@ window.addEventListener("DOMContentLoaded", () => {
     roundWinner             = -1;
     roundEndBannerStartTime = null;
     superBombAvailable      = [true, true];
+    tunnelBombAvailable     = [true, true];
 
     if (gameMode === GameMode.PARALLEL) {
       resetParallelState();
       currentState = GameState.PLAYER_TURN;
     } else {
-      superBombArmed = false;
-      cyclePhase     = 'angle';
-      cycleStartTime = null;
-      lockedAngle    = 0;
+      superBombArmed      = false;
+      tunnelBombArmed     = false;
+      cyclePhase          = 'angle';
+      cycleStartTime      = null;
+      lockedAngle         = 0;
+      projectiles         = [];
+      seqExplosions       = [];
+      seqReloadAt         = null;
+      seqAimingForReload  = false;
+      isArmUp             = false;
+      if (armUpTimer !== null) { clearTimeout(armUpTimer); armUpTimer = null; }
       setInputEnabled(true);
       setActivePlayer(loserIndex);
       currentState = GameState.PLAYER_TURN;
@@ -360,15 +416,19 @@ window.addEventListener("DOMContentLoaded", () => {
     if (armUpTimer !== null) { clearTimeout(armUpTimer); armUpTimer = null; }
     resetParallelState();
 
-    projectile              = null;
+    projectiles             = [];
+    seqExplosions           = [];
+    seqReloadAt             = null;
+    seqAimingForReload      = false;
     isArmUp                 = false;
-    explosion               = null;
     roundWinner             = -1;
     roundWinsByPlayer       = [0, 0];
     matchWinner             = null;
     roundEndBannerStartTime = null;
     superBombAvailable      = [true, true];
+    tunnelBombAvailable     = [true, true];
     superBombArmed          = false;
+    tunnelBombArmed         = false;
     cyclePhase              = 'angle';
     cycleStartTime          = null;
     lockedAngle             = 0;
@@ -454,25 +514,31 @@ window.addEventListener("DOMContentLoaded", () => {
         handleParallelShift(1);
       } else if ((event.key === "s" || event.key === "S") &&
                  currentState === GameState.PLAYER_TURN && !parallelRoundOver &&
-                 superBombAvailable[0] && par[0].canFire && !par[0].isArmUp && par[0].projectile === null) {
-        par[0].superBombArmed = !par[0].superBombArmed;
-        playSound(par[0].superBombArmed ? "superBombArm" : "superBombDisarm");
+                 par[0].canFire && !par[0].isArmUp) {
+        const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], par[0].superBombArmed, par[0].tunnelBombArmed);
+        par[0].superBombArmed  = r.superArmed;
+        par[0].tunnelBombArmed = r.tunnelArmed;
+        if (r.sound) playSound(r.sound);
         redraw();
       } else if ((event.key === "l" || event.key === "L") &&
                  currentState === GameState.PLAYER_TURN && !parallelRoundOver &&
-                 superBombAvailable[1] && par[1].canFire && !par[1].isArmUp && par[1].projectile === null) {
-        par[1].superBombArmed = !par[1].superBombArmed;
-        playSound(par[1].superBombArmed ? "superBombArm" : "superBombDisarm");
+                 par[1].canFire && !par[1].isArmUp) {
+        const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], par[1].superBombArmed, par[1].tunnelBombArmed);
+        par[1].superBombArmed  = r.superArmed;
+        par[1].tunnelBombArmed = r.tunnelArmed;
+        if (r.sound) playSound(r.sound);
         redraw();
       }
       return;
     }
 
     if ((event.key === "s" || event.key === "S") &&
-        currentState === GameState.PLAYER_TURN && !isArmUp &&
-        superBombAvailable[activePlayerIndex]) {
-      superBombArmed = !superBombArmed;
-      playSound(superBombArmed ? "superBombArm" : "superBombDisarm");
+        (currentState === GameState.PLAYER_TURN || (currentState === GameState.RESOLVING && seqAimingForReload)) &&
+        !isArmUp) {
+      const r = cycleBomb(superBombAvailable[activePlayerIndex], tunnelBombAvailable[activePlayerIndex], superBombArmed, tunnelBombArmed);
+      superBombArmed  = r.superArmed;
+      tunnelBombArmed = r.tunnelArmed;
+      if (r.sound) playSound(r.sound);
       redraw();
     }
   });
@@ -512,14 +578,18 @@ window.addEventListener("DOMContentLoaded", () => {
 
         if (cx >= p1BtnX && cx <= p1BtnX + SB_BTN_W) {
           if (gameMode === GameMode.PARALLEL) {
-            if (!parallelRoundOver && superBombAvailable[0] && par[0].canFire && !par[0].isArmUp && par[0].projectile === null) {
-              par[0].superBombArmed = !par[0].superBombArmed;
-              playSound(par[0].superBombArmed ? "superBombArm" : "superBombDisarm");
+            if (!parallelRoundOver && par[0].canFire && !par[0].isArmUp) {
+              const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], par[0].superBombArmed, par[0].tunnelBombArmed);
+              par[0].superBombArmed  = r.superArmed;
+              par[0].tunnelBombArmed = r.tunnelArmed;
+              if (r.sound) playSound(r.sound);
               redraw();
             }
-          } else if (activePlayerIndex === 0 && superBombAvailable[0] && !isArmUp) {
-            superBombArmed = !superBombArmed;
-            playSound(superBombArmed ? "superBombArm" : "superBombDisarm");
+          } else if (activePlayerIndex === 0 && !isArmUp) {
+            const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], superBombArmed, tunnelBombArmed);
+            superBombArmed  = r.superArmed;
+            tunnelBombArmed = r.tunnelArmed;
+            if (r.sound) playSound(r.sound);
             redraw();
           }
           return;
@@ -527,14 +597,18 @@ window.addEventListener("DOMContentLoaded", () => {
 
         if (cx >= p2BtnX && cx <= p2BtnX + SB_BTN_W) {
           if (gameMode === GameMode.PARALLEL) {
-            if (!parallelRoundOver && superBombAvailable[1] && par[1].canFire && !par[1].isArmUp && par[1].projectile === null) {
-              par[1].superBombArmed = !par[1].superBombArmed;
-              playSound(par[1].superBombArmed ? "superBombArm" : "superBombDisarm");
+            if (!parallelRoundOver && par[1].canFire && !par[1].isArmUp) {
+              const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], par[1].superBombArmed, par[1].tunnelBombArmed);
+              par[1].superBombArmed  = r.superArmed;
+              par[1].tunnelBombArmed = r.tunnelArmed;
+              if (r.sound) playSound(r.sound);
               redraw();
             }
-          } else if (activePlayerIndex === 1 && superBombAvailable[1] && !isArmUp) {
-            superBombArmed = !superBombArmed;
-            playSound(superBombArmed ? "superBombArm" : "superBombDisarm");
+          } else if (activePlayerIndex === 1 && !isArmUp) {
+            const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], superBombArmed, tunnelBombArmed);
+            superBombArmed  = r.superArmed;
+            tunnelBombArmed = r.tunnelArmed;
+            if (r.sound) playSound(r.sound);
             redraw();
           }
           return;
@@ -562,12 +636,21 @@ window.addEventListener("DOMContentLoaded", () => {
       ? 0
       : Math.min((timeMs - lastTime) / 1000, MAX_FRAME_DT);
     lastTime = timeMs;
+    let anyDrilling = false;
 
     // ── PARALLEL PLAYER_TURN ─────────────────────────────────────────────────
     if (currentState === GameState.PLAYER_TURN && gameMode === GameMode.PARALLEL) {
       for (let p = 0; p < 2; p++) {
-        // Advance aim cycle for players who can still fire
-        if (par[p].canFire && !par[p].isArmUp && par[p].projectile === null && !parallelRoundOver) {
+        // Re-enable firing after reload cooldown expires
+        if (!par[p].canFire && !par[p].isArmUp && performance.now() >= par[p].reloadAt) {
+          par[p].canFire        = true;
+          par[p].cyclePhase     = 'angle';
+          par[p].cycleStartTime = null;
+          par[p].lockedAngle    = 0;
+        }
+
+        // Advance aim cycle for players who can fire
+        if (par[p].canFire && !par[p].isArmUp && !parallelRoundOver) {
           if (par[p].cycleStartTime === null) par[p].cycleStartTime = timeMs;
           const elapsed = timeMs - par[p].cycleStartTime;
           if (par[p].cyclePhase === 'angle') {
@@ -577,64 +660,77 @@ window.addEventListener("DOMContentLoaded", () => {
           }
         }
 
-        // Step projectile
-        if (par[p].projectile !== null) {
-          stepProjectile(par[p].projectile, world.wind, dt);
+        // Step all in-flight projectiles
+        for (let j = par[p].projectiles.length - 1; j >= 0; j--) {
+          const proj  = par[p].projectiles[j];
+          const inBuildingPar = proj.isTunnelBomb &&
+            world.city.buildings.find(b => proj.x >= b.x && proj.x < b.x + b.width && proj.y >= b.y);
+          const effectiveDtPar = inBuildingPar ? dt * TUNNEL_BOMB_DRILL_SPEED_FACTOR : dt;
+          stepProjectile(proj, world.wind, effectiveDtPar);
           const enemy = 1 - p;
 
-          if (hitsCharacter(par[p].projectile, world.characters[enemy])) {
-            const damage = par[p].projectile.isSuperBomb ? 2 : 1;
+          if (hitsCharacter(proj, world.characters[enemy])) {
+            const damage = proj.isSuperBomb ? 2 : 1;
             hp[enemy] = Math.max(0, hp[enemy] - damage);
-            playSound(par[p].projectile.isSuperBomb ? "explosionSuper" : "explosion");
+            playSound(proj.isSuperBomb ? "explosionSuper" : "explosion");
+            playSound("playerHit");
             const hitChar = world.characters[enemy];
-            const bigR    = par[p].projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
-            par[p].explosion  = { x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigR, startTime: timeMs };
-            triggerShake(par[p].projectile.isSuperBomb ? 20 : 12);
-            par[p].projectile = null;
+            const bigR    = proj.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
+            par[p].explosions.push({ x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigR, startTime: timeMs });
+            triggerShake(proj.isSuperBomb ? 20 : 12);
+            par[p].projectiles.splice(j, 1);
             if (hp[enemy] === 0) {
               roundWinsByPlayer[p]++;
               playSound("roundWin");
-              if (par[enemy].projectile !== null) par[enemy].projectile = null;
+              par[enemy].projectiles = [];
               roundWinner       = p;
               parallelRoundOver = true;
-            } else {
-              par[p].canFire        = true;
-              par[p].cyclePhase     = 'angle';
-              par[p].cycleStartTime = null;
-              par[p].lockedAngle    = 0;
             }
 
-          } else if (hitsCity(par[p].projectile, world.city.ctx)) {
-            playSound(par[p].projectile.isSuperBomb ? "explosionSuper" : "explosion");
-            const craterR    = par[p].projectile.isSuperBomb ? SUPER_BOMB_CRATER_RADIUS : EXPLOSION_CRATER_RADIUS;
-            const explosionR = par[p].projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
-            carveCrater(world, par[p].projectile.x, par[p].projectile.y, craterR);
-            par[p].explosion      = { x: par[p].projectile.x, y: par[p].projectile.y, radius: explosionR, startTime: timeMs };
-            triggerShake(par[p].projectile.isSuperBomb ? 12 : 6);
-            par[p].projectile     = null;
-            par[p].canFire        = true;
-            par[p].cyclePhase     = 'angle';
-            par[p].cycleStartTime = null;
-            par[p].lockedAngle    = 0;
+          } else if (proj.isTunnelBomb) {
+            const overB = world.city.buildings.find(b => proj.x >= b.x && proj.x < b.x + b.width);
+            if (overB && proj.y >= overB.y) {
+              anyDrilling = true;
+              proj.drillPx += Math.hypot(proj.vx, proj.vy) * effectiveDtPar;
+              if (hitsCity(proj, world.city.ctx)) carveCrater(world, proj.x, proj.y, TUNNEL_BOMB_TUNNEL_RADIUS);
+              if (proj.drillPx >= TUNNEL_BOMB_MAX_DRILL_PX) {
+                playSound("explosion");
+                par[p].explosions.push({ x: proj.x, y: proj.y, radius: TUNNEL_BOMB_DRAW_RADIUS, startTime: timeMs });
+                triggerShake(8);
+                par[p].projectiles.splice(j, 1);
+              }
+            } else if (isOffScreen(proj, CANVAS_WIDTH, CANVAS_HEIGHT)) {
+              playSound("miss");
+              par[p].projectiles.splice(j, 1);
+            }
 
-          } else if (isOffScreen(par[p].projectile, CANVAS_WIDTH, CANVAS_HEIGHT)) {
+          } else if (hitsCity(proj, world.city.ctx)) {
+              playSound(proj.isSuperBomb ? "explosionSuper" : "explosion");
+              const craterR    = proj.isSuperBomb ? SUPER_BOMB_CRATER_RADIUS : EXPLOSION_CRATER_RADIUS;
+              const explosionR = proj.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
+              carveCrater(world, proj.x, proj.y, craterR);
+              par[p].explosions.push({ x: proj.x, y: proj.y, radius: explosionR, startTime: timeMs });
+              triggerShake(proj.isSuperBomb ? 12 : 6);
+              par[p].projectiles.splice(j, 1);
+
+          } else if (isOffScreen(proj, CANVAS_WIDTH, CANVAS_HEIGHT)) {
             playSound("miss");
-            par[p].projectile     = null;
-            par[p].canFire        = true;
-            par[p].cyclePhase     = 'angle';
-            par[p].cycleStartTime = null;
-            par[p].lockedAngle    = 0;
+            par[p].projectiles.splice(j, 1);
           }
         }
 
-        // Advance explosion
-        if (par[p].explosion !== null && timeMs - par[p].explosion.startTime >= EXPLOSION_DURATION_MS) {
-          par[p].explosion = null;
+        // Advance explosion animations
+        for (let j = par[p].explosions.length - 1; j >= 0; j--) {
+          if (timeMs - par[p].explosions[j].startTime >= EXPLOSION_DURATION_MS) {
+            par[p].explosions.splice(j, 1);
+          }
         }
       }
 
-      // Transition out of parallel round when all explosions are gone
-      if (parallelRoundOver && par[0].explosion === null && par[1].explosion === null) {
+      // Transition out of parallel round when all projectiles and explosions are gone
+      const parDone = par[0].projectiles.length === 0 && par[1].projectiles.length === 0 &&
+                      par[0].explosions.length  === 0 && par[1].explosions.length  === 0;
+      if (parallelRoundOver && parDone) {
         if (roundWinsByPlayer[roundWinner] >= MATCH_WIN_THRESHOLD) {
           matchWinner  = roundWinner;
           currentState = GameState.MATCH_END;
@@ -647,54 +743,94 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     // ── SEQUENTIAL RESOLVING ─────────────────────────────────────────────────
-    if (currentState === GameState.RESOLVING && projectile !== null) {
-      stepProjectile(projectile, world.wind, dt);
+    if (currentState === GameState.RESOLVING) {
+      // Re-enable aiming after reload cooldown expires
+      if (seqReloadAt !== null && performance.now() >= seqReloadAt) {
+        seqReloadAt        = null;
+        seqAimingForReload = true;
+        cyclePhase         = 'angle';
+        cycleStartTime     = null;
+        lockedAngle        = 0;
+        setInputEnabled(true);
+      }
 
-      let hitCharIndex = -1;
-      for (let i = 0; i < world.characters.length; i++) {
-        if (i !== throwingPlayerIndex && hitsCharacter(projectile, world.characters[i])) {
-          hitCharIndex = i;
-          break;
+      // Step all in-flight projectiles
+      for (let j = projectiles.length - 1; j >= 0; j--) {
+        const proj = projectiles[j];
+        const inBuildingSeq = proj.isTunnelBomb &&
+          world.city.buildings.find(b => proj.x >= b.x && proj.x < b.x + b.width && proj.y >= b.y);
+        const effectiveDtSeq = inBuildingSeq ? dt * TUNNEL_BOMB_DRILL_SPEED_FACTOR : dt;
+        stepProjectile(proj, world.wind, effectiveDtSeq);
+
+        let hitCharIndex = -1;
+        for (let i = 0; i < world.characters.length; i++) {
+          if (i !== throwingPlayerIndex && hitsCharacter(proj, world.characters[i])) {
+            hitCharIndex = i;
+            break;
+          }
+        }
+
+        if (hitCharIndex !== -1) {
+          const damage = proj.isSuperBomb ? 2 : 1;
+          hp[hitCharIndex] = Math.max(0, hp[hitCharIndex] - damage);
+          playSound(proj.isSuperBomb ? "explosionSuper" : "explosion");
+          playSound("playerHit");
+          const hitChar   = world.characters[hitCharIndex];
+          const bigRadius = proj.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
+          seqExplosions.push({ x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigRadius, startTime: timeMs });
+          triggerShake(proj.isSuperBomb ? 20 : 12);
+          if (hp[hitCharIndex] === 0) {
+            roundWinsByPlayer[throwingPlayerIndex]++;
+            playSound("roundWin");
+            roundWinner = throwingPlayerIndex;
+          }
+          projectiles.splice(j, 1);
+
+        } else if (proj.isTunnelBomb) {
+          // Use building bounding boxes — not hitsCity — so drillPx accumulates
+          // continuously even after pixels are carved away by the bomb itself.
+          const overB = world.city.buildings.find(b => proj.x >= b.x && proj.x < b.x + b.width);
+          if (overB && proj.y >= overB.y) {
+            anyDrilling = true;
+            proj.drillPx += Math.hypot(proj.vx, proj.vy) * effectiveDtSeq;
+            if (hitsCity(proj, world.city.ctx)) carveCrater(world, proj.x, proj.y, TUNNEL_BOMB_TUNNEL_RADIUS);
+            if (proj.drillPx >= TUNNEL_BOMB_MAX_DRILL_PX) {
+              playSound("explosion");
+              seqExplosions.push({ x: proj.x, y: proj.y, radius: TUNNEL_BOMB_DRAW_RADIUS, startTime: timeMs });
+              triggerShake(8);
+              projectiles.splice(j, 1);
+            }
+          } else if (isOffScreen(proj, CANVAS_WIDTH, CANVAS_HEIGHT)) {
+            playSound("miss");
+            projectiles.splice(j, 1);
+          }
+
+        } else if (hitsCity(proj, world.city.ctx)) {
+            playSound(proj.isSuperBomb ? "explosionSuper" : "explosion");
+            const craterR    = proj.isSuperBomb ? SUPER_BOMB_CRATER_RADIUS : EXPLOSION_CRATER_RADIUS;
+            const explosionR = proj.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
+            carveCrater(world, proj.x, proj.y, craterR);
+            seqExplosions.push({ x: proj.x, y: proj.y, radius: explosionR, startTime: timeMs });
+            triggerShake(proj.isSuperBomb ? 12 : 6);
+            projectiles.splice(j, 1);
+
+        } else if (isOffScreen(proj, CANVAS_WIDTH, CANVAS_HEIGHT)) {
+          playSound("miss");
+          projectiles.splice(j, 1);
         }
       }
 
-      if (hitCharIndex !== -1) {
-        const damage = projectile.isSuperBomb ? 2 : 1;
-        hp[hitCharIndex] = Math.max(0, hp[hitCharIndex] - damage);
-        playSound(projectile.isSuperBomb ? "explosionSuper" : "explosion");
-        const hitChar   = world.characters[hitCharIndex];
-        const bigRadius = projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
-        explosion    = { x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigRadius, startTime: timeMs };
-        triggerShake(projectile.isSuperBomb ? 20 : 12);
-        if (hp[hitCharIndex] === 0) {
-          roundWinsByPlayer[throwingPlayerIndex]++;
-          playSound("roundWin");
-          roundWinner = throwingPlayerIndex;
+      // Advance explosion animations
+      for (let j = seqExplosions.length - 1; j >= 0; j--) {
+        if (timeMs - seqExplosions[j].startTime >= EXPLOSION_DURATION_MS) {
+          seqExplosions.splice(j, 1);
         }
-        projectile   = null;
-        currentState = GameState.EXPLODING;
-
-      } else if (hitsCity(projectile, world.city.ctx)) {
-        playSound(projectile.isSuperBomb ? "explosionSuper" : "explosion");
-        const craterR    = projectile.isSuperBomb ? SUPER_BOMB_CRATER_RADIUS : EXPLOSION_CRATER_RADIUS;
-        const explosionR = projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
-        carveCrater(world, projectile.x, projectile.y, craterR);
-        explosion    = { x: projectile.x, y: projectile.y, radius: explosionR, startTime: timeMs };
-        triggerShake(projectile.isSuperBomb ? 12 : 6);
-        projectile   = null;
-        currentState = GameState.EXPLODING;
-
-      } else if (isOffScreen(projectile, CANVAS_WIDTH, CANVAS_HEIGHT)) {
-        playSound("miss");
-        projectile = null;
-        nextTurn();
       }
-    }
 
-    // ── SEQUENTIAL EXPLODING ─────────────────────────────────────────────────
-    if (currentState === GameState.EXPLODING && explosion !== null) {
-      if (timeMs - explosion.startTime >= EXPLOSION_DURATION_MS) {
-        explosion = null;
+      // Transition out of RESOLVING when nothing is left in flight or animating
+      if (projectiles.length === 0 && seqExplosions.length === 0 && armUpTimer === null) {
+        seqReloadAt        = null;
+        seqAimingForReload = false;
         if (roundWinner !== -1) {
           roundEndBannerStartTime = timeMs;
           currentState = GameState.ROUND_END_BANNER;
@@ -703,6 +839,9 @@ window.addEventListener("DOMContentLoaded", () => {
         }
       }
     }
+
+    // Start or stop the drill sound based on whether any tunnel bomb is grinding
+    if (anyDrilling) startDrillSound(); else stopDrillSound();
 
     // ── ROUND_END_BANNER ─────────────────────────────────────────────────────
     if (currentState === GameState.ROUND_END_BANNER && roundEndBannerStartTime !== null) {
@@ -718,7 +857,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     // ── SEQUENTIAL aim cycling ───────────────────────────────────────────────
-    if (currentState === GameState.PLAYER_TURN && !isArmUp && gameMode === GameMode.SEQUENTIAL) {
+    if ((currentState === GameState.PLAYER_TURN || (currentState === GameState.RESOLVING && seqAimingForReload)) && !isArmUp && gameMode === GameMode.SEQUENTIAL) {
       if (cycleStartTime === null) cycleStartTime = timeMs;
       const elapsed = timeMs - cycleStartTime;
       if (cyclePhase === 'angle') {

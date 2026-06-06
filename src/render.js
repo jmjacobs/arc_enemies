@@ -34,6 +34,8 @@ import {
   SUPER_BOMB_INDICATOR_ARMED_COLOR,
   SUPER_BOMB_PROJECTILE_RADIUS,
   SUPER_BOMB_PROJECTILE_COLOR,
+  TUNNEL_BOMB_PROJECTILE_RADIUS,
+  TUNNEL_BOMB_PROJECTILE_COLOR,
   BANNER_BG_RGBA,
   BANNER_HEIGHT,
   BANNER_TITLE_FONT,
@@ -239,12 +241,13 @@ export function drawCharacter(ctx, character, pose = "idle") {
 
 // Draw the flying projectile plus its fading trail.
 export function drawProjectile(ctx, projectile) {
-  const isSuperBomb = projectile.isSuperBomb;
-  const color  = isSuperBomb ? SUPER_BOMB_PROJECTILE_COLOR : PROJECTILE_COLOR;
-  const radius = isSuperBomb ? SUPER_BOMB_PROJECTILE_RADIUS : PROJECTILE_RADIUS;
-  const trailR = isSuperBomb ? 255 : 255;
-  const trailG = isSuperBomb ?  40 : 216;
-  const trailB = isSuperBomb ?  40 :  77;
+  const isSuperBomb  = projectile.isSuperBomb;
+  const isTunnelBomb = projectile.isTunnelBomb;
+  const color  = isSuperBomb ? SUPER_BOMB_PROJECTILE_COLOR  : (isTunnelBomb ? TUNNEL_BOMB_PROJECTILE_COLOR  : PROJECTILE_COLOR);
+  const radius = isSuperBomb ? SUPER_BOMB_PROJECTILE_RADIUS : (isTunnelBomb ? TUNNEL_BOMB_PROJECTILE_RADIUS : PROJECTILE_RADIUS);
+  const trailR = isSuperBomb ? 255 : (isTunnelBomb ? 170 : 255);
+  const trailG = isSuperBomb ?  40 : (isTunnelBomb ? 221 : 216);
+  const trailB = isSuperBomb ?  40 : (isTunnelBomb ? 255 :  77);
 
   for (let i = 0; i < projectile.trail.length; i++) {
     const point     = projectile.trail[i];
@@ -337,48 +340,87 @@ export const SB_BTN_W = 200;
 export const SB_BTN_H = 28;
 export const SB_BTN_Y = WIND_BAR_HEIGHT + 8;
 
-// Draw super bomb availability as tappable buttons below each score pill.
-// superBombArmed may be a boolean (sequential) or [bool, bool] (parallel).
-export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, activePlayerIndex) {
-  function isArmed(playerIndex) {
-    if (Array.isArray(superBombArmed)) return superBombArmed[playerIndex];
-    return superBombArmed && playerIndex === activePlayerIndex;
+// Draw the bomb inventory for both players — three pills per player:
+// NORMAL | SUPER | DRILL. Selected pill is highlighted; used-up pills are dim.
+// superBombArmed / tunnelBombArmed may be boolean (sequential) or [bool,bool] (parallel).
+export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, tunnelBombAvailable, tunnelBombArmed, activePlayerIndex, isParallel = false) {
+  const PILL_W = 60, PILL_H = 24, PILL_GAP = 4;
+  const TOTAL_W = 3 * PILL_W + 2 * PILL_GAP;
+
+  function armedSuper(p)  {
+    if (Array.isArray(superBombArmed))  return superBombArmed[p];
+    return superBombArmed  && p === activePlayerIndex;
+  }
+  function armedTunnel(p) {
+    if (Array.isArray(tunnelBombArmed)) return tunnelBombArmed[p];
+    return tunnelBombArmed && p === activePlayerIndex;
   }
 
-  function drawIndicator(playerIndex, btnX, keyLabel) {
-    if (!superBombAvailable[playerIndex]) return;
+  function drawPlayer(playerIndex, startX) {
+    const color  = playerIndex === 0 ? CHARACTER_COLORS.player1 : CHARACTER_COLORS.player2;
+    const aSuper  = armedSuper(playerIndex);
+    const aTunnel = armedTunnel(playerIndex);
+    const current = aSuper ? 'super' : (aTunnel ? 'tunnel' : 'normal');
 
-    const armed = isArmed(playerIndex);
-    const color = armed ? SUPER_BOMB_INDICATOR_ARMED_COLOR : SUPER_BOMB_INDICATOR_COLOR;
-    const label = armed ? "SUPER BOMB ARMED" : `[${keyLabel} KEY] FOR SUPER BOMB`;
+    const pills = [
+      { key: 'normal', label: 'NORMAL', avail: true },
+      { key: 'super',  label: 'SUPER',  avail: superBombAvailable[playerIndex] },
+      { key: 'tunnel', label: 'DRILL',  avail: tunnelBombAvailable[playerIndex] },
+    ];
 
-    ctx.save();
-    ctx.fillStyle   = `${color}22`;
-    ctx.strokeStyle = color;
-    ctx.lineWidth   = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(btnX, SB_BTN_Y, SB_BTN_W, SB_BTN_H, 6);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    for (let i = 0; i < pills.length; i++) {
+      const { key, label, avail } = pills[i];
+      const px  = startX + i * (PILL_W + PILL_GAP);
+      const py  = SB_BTN_Y;
+      const sel = key === current;
 
-    ctx.font         = "bold 12px 'Courier New', monospace";
-    ctx.fillStyle    = color;
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, btnX + SB_BTN_W / 2, SB_BTN_Y + SB_BTN_H / 2);
+      ctx.save();
+      if (sel && key !== 'normal') {
+        ctx.shadowColor = color;
+        ctx.shadowBlur  = 10;
+      }
+      if (sel) {
+        ctx.fillStyle   = `${color}44`;
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = 2;
+      } else if (avail) {
+        ctx.fillStyle   = `${color}18`;
+        ctx.strokeStyle = `${color}55`;
+        ctx.lineWidth   = 1;
+      } else {
+        ctx.fillStyle   = 'rgba(40,40,40,0.4)';
+        ctx.strokeStyle = 'rgba(100,100,100,0.25)';
+        ctx.lineWidth   = 1;
+      }
+      ctx.beginPath();
+      ctx.roundRect(px, py, PILL_W, PILL_H, 5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.font         = `${sel ? 'bold ' : ''}10px 'Courier New', monospace`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle    = sel
+        ? (key === 'super' ? SUPER_BOMB_INDICATOR_ARMED_COLOR : key === 'tunnel' ? TUNNEL_BOMB_PROJECTILE_COLOR : color)
+        : (avail ? `${color}88` : 'rgba(90,90,90,0.6)');
+      ctx.fillText(avail || key === 'normal' ? label : `${label} ✗`, px + PILL_W / 2, py + PILL_H / 2);
+    }
+
+    // Key hint below pills
+    const keyLabel = playerIndex === 0 ? 'S' : 'L';
+    const hintY = SB_BTN_Y + PILL_H + 7;
+    ctx.font         = `bold 10px system-ui, sans-serif`;
+    ctx.fillStyle    = `${color}66`;
+    ctx.textBaseline = 'top';
+    ctx.textAlign    = playerIndex === 0 ? 'left' : 'right';
+    const hintX      = playerIndex === 0 ? startX : startX + TOTAL_W;
+    const shiftHint  = isParallel ? `  -  [${playerIndex === 0 ? 'L-SHIFT' : 'R-SHIFT'}] FIRE` : '';
+    ctx.fillText(`[${keyLabel}] CYCLE WEAPONS${shiftHint}`, hintX, hintY);
   }
 
-  drawIndicator(0, SCOREBOARD_MARGIN_X,                        "S");
-  drawIndicator(1, CANVAS_WIDTH - SCOREBOARD_MARGIN_X - SB_BTN_W, "L");
-
-  const hintY = SB_BTN_Y + SB_BTN_H + 10;
-  ctx.font         = "bold 11px system-ui, sans-serif";
-  ctx.fillStyle    = "#ffffff";
-  ctx.textBaseline = "top";
-  ctx.textAlign    = "center";
-  ctx.fillText("LEFT SHIFT KEY FIRES", SCOREBOARD_MARGIN_X + SB_BTN_W / 2, hintY);
-  ctx.fillText("RIGHT SHIFT KEY FIRES", CANVAS_WIDTH - SCOREBOARD_MARGIN_X - SB_BTN_W / 2, hintY);
+  drawPlayer(0, SCOREBOARD_MARGIN_X);
+  drawPlayer(1, CANVAS_WIDTH - SCOREBOARD_MARGIN_X - TOTAL_W);
 }
 
 // Draw the downward-pointing triangle that bobs above the active character.
@@ -751,29 +793,31 @@ function drawHealthBar(ctx, character, playerHp, playerIndex) {
 //   projectile → explosion → HUD → hint → active indicator → banner
 //
 // Options:
-//   projectile          — in-flight projectile, or null
+//   projectiles         — array of in-flight sequential projectiles
 //   throwingPlayerIndex — who threw (for arm-up pose)
 //   isArmUp             — true during the brief pre-launch wind-up
 //   aim                 — { angle, velocity } for the aim line
-//   showAimLine         — only true during PLAYER_TURN
-//   showHint            — only true during PLAYER_TURN
-//   explosion           — active explosion object, or null
+//   showAimLine         — only true during PLAYER_TURN (or reload re-aim)
+//   showHint            — only true during PLAYER_TURN (or reload re-aim)
+//   seqExplosions       — array of active sequential explosion objects
 //   roundWinsByPlayer   — [p1wins, p2wins] for the scoreboard
 //   roundBannerWinner   — ≥0 to show the round-win banner (winnerIndex)
 //   matchBannerWinner   — ≥0 to show the match-win banner (winnerIndex)
 export function drawScene(ctx, world, activePlayerIndex, timeMs, {
-  projectile          = null,
+  projectiles         = [],
   throwingPlayerIndex = -1,
   isArmUp             = false,
   aim                 = null,
   showAimLine         = false,
   showHint            = false,
-  explosion           = null,
+  seqExplosions       = [],
   roundWinsByPlayer   = [0, 0],
   roundBannerWinner   = -1,
   matchBannerWinner   = -1,
   superBombAvailable  = [true, true],
   superBombArmed      = false,
+  tunnelBombAvailable = [true, true],
+  tunnelBombArmed     = false,
   playerNames         = ["Player 1", "Player 2"],
   parallelData        = null,
   hp                  = [MAX_HP, MAX_HP],
@@ -792,7 +836,7 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
   drawSky(ctx, world.theme);
   drawWindIndicator(ctx, world.wind);
   drawScoreboard(ctx, roundWinsByPlayer, playerNames);
-  drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, activePlayerIndex);
+  drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, tunnelBombAvailable, tunnelBombArmed, activePlayerIndex, Boolean(parallelData));
 
   drawCity(ctx, world);
 
@@ -809,13 +853,13 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
         drawAimLine(ctx, world.characters[i], parallelData.aims[i].angle, parallelData.aims[i].velocity, Array.isArray(superBombArmed) ? superBombArmed[i] : false);
       }
     }
-    // Projectiles
+    // Projectiles (array per player)
     for (let i = 0; i < 2; i++) {
-      if (parallelData.projectiles[i] !== null) drawProjectile(ctx, parallelData.projectiles[i]);
+      for (const proj of parallelData.projectiles[i]) drawProjectile(ctx, proj);
     }
-    // Explosions
+    // Explosions (array per player)
     for (let i = 0; i < 2; i++) {
-      if (parallelData.explosions[i] !== null) drawExplosion(ctx, parallelData.explosions[i], timeMs);
+      for (const expl of parallelData.explosions[i]) drawExplosion(ctx, expl, timeMs);
     }
   } else {
     // Sequential mode
@@ -827,30 +871,31 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
     if (showAimLine && aim) {
       drawAimLine(ctx, world.characters[activePlayerIndex], aim.angle, aim.velocity, superBombArmed);
     }
-    if (projectile !== null) drawProjectile(ctx, projectile);
-    if (explosion  !== null) drawExplosion(ctx, explosion, timeMs);
+    for (const proj of projectiles) drawProjectile(ctx, proj);
+    for (const expl of seqExplosions) drawExplosion(ctx, expl, timeMs);
   }
 
   const anyProjectile = parallelData
-    ? parallelData.projectiles.some(p => p !== null)
-    : projectile !== null;
+    ? parallelData.projectiles.some(arr => arr.length > 0)
+    : projectiles.length > 0;
   const anyExplosion = parallelData
-    ? parallelData.explosions.some(e => e !== null)
-    : explosion !== null;
+    ? parallelData.explosions.some(arr => arr.length > 0)
+    : seqExplosions.length > 0;
   const anyArmUp = parallelData
     ? parallelData.isArmUp.some(Boolean)
     : isArmUp;
 
   const bannerActive = roundBannerWinner >= 0 || matchBannerWinner >= 0;
-  if (!anyArmUp && !anyProjectile && !anyExplosion && !bannerActive) {
-    if (parallelData) {
-      // In parallel mode show both indicators
-      for (let i = 0; i < 2; i++) {
-        if (parallelData.canFire[i]) drawActiveIndicator(ctx, world.characters[i], timeMs);
+  if (parallelData) {
+    // Parallel: show indicator per player independently of projectile state
+    for (let i = 0; i < 2; i++) {
+      if (parallelData.canFire[i] && !parallelData.isArmUp[i] && !bannerActive) {
+        drawActiveIndicator(ctx, world.characters[i], timeMs);
       }
-    } else {
-      drawActiveIndicator(ctx, world.characters[activePlayerIndex], timeMs);
     }
+  } else if (!anyArmUp && !bannerActive && (showAimLine || (!anyProjectile && !anyExplosion))) {
+    // Sequential: show when player can aim, or when nothing is in flight
+    drawActiveIndicator(ctx, world.characters[activePlayerIndex], timeMs);
   }
 
   // Banners sit on top of everything else.

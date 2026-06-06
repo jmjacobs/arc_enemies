@@ -320,6 +320,81 @@ function playConfirm() {
   });
 }
 
+// Dramatic celebratory hit — meaty impact punch followed immediately by a
+// bright ascending arpeggio so the shooter feels rewarded.
+function playPlayerHit() {
+  const c   = getCtx();
+  const now = c.currentTime;
+
+  // === Impact layer (instant) ===
+
+  // Deep thud
+  const thud  = c.createBufferSource();
+  thud.buffer = getNoise();
+  const thudF = c.createBiquadFilter();
+  thudF.type  = "lowpass";
+  thudF.frequency.setValueAtTime(320, now);
+  thudF.frequency.exponentialRampToValueAtTime(70, now + 0.18);
+  const thudG = c.createGain();
+  thudG.gain.setValueAtTime(0,   now);
+  thudG.gain.linearRampToValueAtTime(2.4, now + 0.003);
+  thudG.gain.setValueAtTime(1.5, now + 0.018);
+  thudG.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+  thud.connect(thudF); thudF.connect(thudG); thudG.connect(c.destination);
+  thud.start(now); thud.stop(now + 0.30);
+
+  // Punch tone — descending bass sine
+  const punch = c.createOscillator();
+  punch.type  = "sine";
+  punch.frequency.setValueAtTime(180, now);
+  punch.frequency.exponentialRampToValueAtTime(38, now + 0.22);
+  const punchG = c.createGain();
+  punchG.gain.setValueAtTime(0,   now);
+  punchG.gain.linearRampToValueAtTime(1.1, now + 0.004);
+  punchG.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+  punch.connect(punchG); punchG.connect(c.destination);
+  punch.start(now); punch.stop(now + 0.26);
+
+  // === Celebratory arpeggio — starts 60ms after impact ===
+  // C5 · E5 · G5 · C6 — major chord sweep, triangle for brightness
+  const notes = [523.25, 659.25, 783.99, 1046.50];
+  const noteDur  = 0.10;
+  const arpStart = now + 0.06;
+
+  notes.forEach((freq, i) => {
+    const t   = arpStart + i * noteDur;
+    const osc = c.createOscillator();
+    osc.type  = "triangle";
+    osc.frequency.value = freq;
+
+    // Slight pitch bend up on each note for a snappy feel
+    osc.frequency.setValueAtTime(freq * 0.97, t);
+    osc.frequency.exponentialRampToValueAtTime(freq, t + 0.015);
+
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.30, t + 0.012);
+    g.gain.setValueAtTime(0.28, t + noteDur * 0.5);
+    g.gain.exponentialRampToValueAtTime(0.001, t + noteDur * 1.1);
+
+    osc.connect(g); g.connect(c.destination);
+    osc.start(t); osc.stop(t + noteDur * 1.2);
+  });
+
+  // High sparkle ping at the top of the arpeggio
+  const sparkleT = arpStart + notes.length * noteDur - 0.02;
+  const sparkle  = c.createOscillator();
+  sparkle.type   = "sine";
+  sparkle.frequency.setValueAtTime(2800, sparkleT);
+  sparkle.frequency.exponentialRampToValueAtTime(3400, sparkleT + 0.06);
+  const sparkleG = c.createGain();
+  sparkleG.gain.setValueAtTime(0, sparkleT);
+  sparkleG.gain.linearRampToValueAtTime(0.18, sparkleT + 0.008);
+  sparkleG.gain.exponentialRampToValueAtTime(0.001, sparkleT + 0.14);
+  sparkle.connect(sparkleG); sparkleG.connect(c.destination);
+  sparkle.start(sparkleT); sparkle.stop(sparkleT + 0.16);
+}
+
 // Very short soft tick — name typing and backspace.
 function playType() {
   const c   = getCtx();
@@ -339,6 +414,88 @@ function playType() {
   osc.stop(now + 0.05);
 }
 
+// ── Drill sound — looping, started/stopped by game.js ────────────────────────
+
+let drillActive = false;
+let drillNodes  = null;
+
+export function startDrillSound() {
+  if (drillActive) return;
+  drillActive = true;
+
+  const c   = getCtx();
+  const now = c.currentTime;
+
+  // Noise layer — rasping scrape texture
+  const noiseSrc    = c.createBufferSource();
+  noiseSrc.buffer   = getNoise();
+  noiseSrc.loop     = true;
+
+  const bandpass        = c.createBiquadFilter();
+  bandpass.type         = 'bandpass';
+  bandpass.frequency.value = 550;
+  bandpass.Q.value      = 4;
+
+  const noiseGain       = c.createGain();
+  noiseGain.gain.value  = 0.5;
+
+  // LFO pulses the noise gain to create a rhythmic "brrrr" grind
+  const lfo         = c.createOscillator();
+  lfo.type          = 'sawtooth';
+  lfo.frequency.value = 16;
+  const lfoGain     = c.createGain();
+  lfoGain.gain.value = 0.35;
+  lfo.connect(lfoGain);
+  lfoGain.connect(noiseGain.gain);
+
+  noiseSrc.connect(bandpass);
+  bandpass.connect(noiseGain);
+
+  // Low mechanical oscillator — rumbling churn underneath
+  const osc         = c.createOscillator();
+  osc.type          = 'sawtooth';
+  osc.frequency.value = 58;
+  const oscFilter   = c.createBiquadFilter();
+  oscFilter.type    = 'lowpass';
+  oscFilter.frequency.value = 300;
+  const oscGain     = c.createGain();
+  oscGain.gain.value = 0.22;
+  osc.connect(oscFilter);
+  oscFilter.connect(oscGain);
+
+  // Master gain — fade in on start, fade out on stop
+  const masterGain  = c.createGain();
+  masterGain.gain.setValueAtTime(0, now);
+  masterGain.gain.linearRampToValueAtTime(0.6, now + 0.08);
+
+  noiseGain.connect(masterGain);
+  oscGain.connect(masterGain);
+  masterGain.connect(c.destination);
+
+  noiseSrc.start(now);
+  lfo.start(now);
+  osc.start(now);
+
+  drillNodes = { noiseSrc, lfo, osc, masterGain };
+}
+
+export function stopDrillSound() {
+  if (!drillActive || !drillNodes) return;
+  drillActive = false;
+
+  const c   = getCtx();
+  const now = c.currentTime;
+  const { noiseSrc, lfo, osc, masterGain } = drillNodes;
+  drillNodes = null;
+
+  masterGain.gain.cancelScheduledValues(now);
+  masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+  masterGain.gain.linearRampToValueAtTime(0, now + 0.12);
+  noiseSrc.stop(now + 0.14);
+  lfo.stop(now + 0.14);
+  osc.stop(now + 0.14);
+}
+
 export function playSound(name) {
   try {
     switch (name) {
@@ -355,6 +512,7 @@ export function playSound(name) {
       case "navigate":        playNavigate();        break;
       case "confirm":         playConfirm();         break;
       case "type":            playType();            break;
+      case "playerHit":       playPlayerHit();       break;
     }
   } catch (_) {
     // Audio errors are non-fatal — game continues without sound.

@@ -138,13 +138,29 @@ export const CHARACTER_HIT_PADDING = 6;
 // When sampling a pixel from the city canvas, alpha above this value means "solid building".
 export const BUILDING_HIT_ALPHA_THRESHOLD = 200;
 
+// Tunnel bomb — drills through buildings, one per round.
+// TUNNEL_RADIUS is the crater carved each frame while inside a building.
+// MAX_DRILL_PX is the total pixel-distance of building material the bomb can
+// pass through before it exhausts and detonates inside the building.
+export const TUNNEL_BOMB_TUNNEL_RADIUS     = 22;
+export const TUNNEL_BOMB_DRAW_RADIUS       = 55;
+export const TUNNEL_BOMB_PROJECTILE_RADIUS = 9;
+export const TUNNEL_BOMB_PROJECTILE_COLOR  = '#aaddff';
+export const TUNNEL_BOMB_MAX_DRILL_PX      = 220;
+// Fraction of normal speed the drill bomb moves while inside a building (1.0 = no slowdown).
+export const TUNNEL_BOMB_DRILL_SPEED_FACTOR = 0.15;
+
 // HP each character starts each round with.
 // Direct hits deal 1 damage; super bombs deal 2.
 export const MAX_HP = 3;
 
+// How long a player must wait after firing before they can fire again.
+// Set to 0 to allow instant re-fire; raise it to force longer waits.
+export const RELOAD_COOLDOWN_MS = 750;
+
 // How many round wins it takes to claim the whole match.
 // Change this to 1 or 2 for shorter matches, 5 for longer ones.
-export const MATCH_WIN_THRESHOLD = 3;
+export const MATCH_WIN_THRESHOLD = 2;
 
 // How long the round-win banner stays on screen before the next round starts.
 // Lower it if the kids are impatient; raise it if they want time to high-five.

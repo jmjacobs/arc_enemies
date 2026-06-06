@@ -19,7 +19,7 @@ html, body {
 
 #game {
   display: block;
-  border: 1px solid #ffffff;
+  border: none;
   transform-origin: center center;
   /* scale is set by the resize handler in index.html */
 }
