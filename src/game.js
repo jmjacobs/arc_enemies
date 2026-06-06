@@ -21,10 +21,12 @@ import {
   ROUND_END_BANNER_DURATION_MS,
   SUPER_BOMB_CRATER_RADIUS,
   SUPER_BOMB_DRAW_RADIUS,
+  THEMES,
+  MAX_HP,
 } from "./config.js";
 import { generateWorld, carveCrater } from "./world.js";
 import { getLaunchPoint, launchVelocity, stepProjectile, isOffScreen, hitsCity, hitsCharacter } from "./physics.js";
-import { drawScene, drawCharacterSelect, SB_BTN_W, SB_BTN_H, SB_BTN_Y, NEW_GAME_BTN } from "./render.js";
+import { drawScene, drawCharacterSelect, SB_BTN_W, SB_BTN_H, SB_BTN_Y, NEW_GAME_BTN, triggerShake } from "./render.js";
 import { setupInput, setAim, getAim, setInputEnabled, setActivePlayer } from "./input.js";
 import { CHARACTERS } from "./characters.js";
 import { playSound } from "./sound.js";
@@ -49,6 +51,8 @@ window.addEventListener("DOMContentLoaded", () => {
   let charNameInput   = "";
   let gameModeIndex   = 1;   // 0 = SEQUENTIAL, 1 = PARALLEL
 
+  let roundIndex              = 0;
+  let hp                      = [MAX_HP, MAX_HP];
   let activePlayerIndex       = 0;
   let roundWinner             = -1;
   let roundWinsByPlayer       = [0, 0];
@@ -92,7 +96,8 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function buildWorld() {
-    world = generateWorld();
+    world = generateWorld(roundIndex % THEMES.length);
+    hp    = [MAX_HP, MAX_HP];
     console.log(`wind:${world.wind}`);
     world.characters[0].charType = charPreview[0];
     world.characters[1].charType = charPreview[1];
@@ -125,6 +130,7 @@ window.addEventListener("DOMContentLoaded", () => {
         superBombArmed:    [par[0].superBombArmed, par[1].superBombArmed],
         playerNames,
         parallelData,
+        hp,
       });
       return;
     }
@@ -144,6 +150,7 @@ window.addEventListener("DOMContentLoaded", () => {
       superBombAvailable,
       superBombArmed,
       playerNames,
+      hp,
     });
   }
 
@@ -328,6 +335,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function startNextRound(loserIndex) {
+    roundIndex++;
     buildWorld();
     activePlayerIndex       = loserIndex;
     roundWinner             = -1;
@@ -365,6 +373,8 @@ window.addEventListener("DOMContentLoaded", () => {
     cycleStartTime          = null;
     lockedAngle             = 0;
     world                   = null;
+    roundIndex              = 0;
+    hp                      = [MAX_HP, MAX_HP];
     activePlayerIndex       = 0;
     charSelectPhase         = 0;
     gameModeIndex           = 0;
@@ -372,6 +382,8 @@ window.addEventListener("DOMContentLoaded", () => {
     charNameInput           = "";
     currentState            = GameState.CHARACTER_SELECT;
 
+    nameInput.value = "";
+    nameInput.blur();
     setInputEnabled(false);
     setActivePlayer(0);
   }
@@ -387,6 +399,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     if (currentState === GameState.CHARACTER_SELECT) {
+      if (event.target === nameInput) return;
       if (charSelectPhase === 2) {
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
           event.preventDefault();
@@ -404,6 +417,7 @@ window.addEventListener("DOMContentLoaded", () => {
       if (event.key === "Backspace") {
         event.preventDefault();
         charNameInput = charNameInput.slice(0, -1);
+        nameInput.value = charNameInput;
         playSound("type");
         redraw();
       } else if (event.key === "ArrowLeft") {
@@ -424,6 +438,7 @@ window.addEventListener("DOMContentLoaded", () => {
       } else if (event.key.length === 1 && charNameInput.length < 14) {
         const ch = charNameInput.length === 0 ? event.key.toUpperCase() : event.key;
         charNameInput += ch;
+        nameInput.value = charNameInput;
         playSound("type");
         redraw();
       }
@@ -568,16 +583,26 @@ window.addEventListener("DOMContentLoaded", () => {
           const enemy = 1 - p;
 
           if (hitsCharacter(par[p].projectile, world.characters[enemy])) {
-            roundWinsByPlayer[p]++;
+            const damage = par[p].projectile.isSuperBomb ? 2 : 1;
+            hp[enemy] = Math.max(0, hp[enemy] - damage);
             playSound(par[p].projectile.isSuperBomb ? "explosionSuper" : "explosion");
-            playSound("roundWin");
             const hitChar = world.characters[enemy];
             const bigR    = par[p].projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
             par[p].explosion  = { x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigR, startTime: timeMs };
+            triggerShake(par[p].projectile.isSuperBomb ? 20 : 12);
             par[p].projectile = null;
-            if (par[enemy].projectile !== null) par[enemy].projectile = null;
-            roundWinner       = p;
-            parallelRoundOver = true;
+            if (hp[enemy] === 0) {
+              roundWinsByPlayer[p]++;
+              playSound("roundWin");
+              if (par[enemy].projectile !== null) par[enemy].projectile = null;
+              roundWinner       = p;
+              parallelRoundOver = true;
+            } else {
+              par[p].canFire        = true;
+              par[p].cyclePhase     = 'angle';
+              par[p].cycleStartTime = null;
+              par[p].lockedAngle    = 0;
+            }
 
           } else if (hitsCity(par[p].projectile, world.city.ctx)) {
             playSound(par[p].projectile.isSuperBomb ? "explosionSuper" : "explosion");
@@ -585,6 +610,7 @@ window.addEventListener("DOMContentLoaded", () => {
             const explosionR = par[p].projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
             carveCrater(world, par[p].projectile.x, par[p].projectile.y, craterR);
             par[p].explosion      = { x: par[p].projectile.x, y: par[p].projectile.y, radius: explosionR, startTime: timeMs };
+            triggerShake(par[p].projectile.isSuperBomb ? 12 : 6);
             par[p].projectile     = null;
             par[p].canFire        = true;
             par[p].cyclePhase     = 'angle';
@@ -633,14 +659,18 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       if (hitCharIndex !== -1) {
-        const winnerIndex = throwingPlayerIndex;
-        roundWinsByPlayer[winnerIndex]++;
+        const damage = projectile.isSuperBomb ? 2 : 1;
+        hp[hitCharIndex] = Math.max(0, hp[hitCharIndex] - damage);
         playSound(projectile.isSuperBomb ? "explosionSuper" : "explosion");
-        playSound("roundWin");
         const hitChar   = world.characters[hitCharIndex];
         const bigRadius = projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS : EXPLOSION_BIG_DRAW_RADIUS;
         explosion    = { x: hitChar.x + hitChar.width / 2, y: hitChar.y + hitChar.height / 2, radius: bigRadius, startTime: timeMs };
-        roundWinner  = winnerIndex;
+        triggerShake(projectile.isSuperBomb ? 20 : 12);
+        if (hp[hitCharIndex] === 0) {
+          roundWinsByPlayer[throwingPlayerIndex]++;
+          playSound("roundWin");
+          roundWinner = throwingPlayerIndex;
+        }
         projectile   = null;
         currentState = GameState.EXPLODING;
 
@@ -650,6 +680,7 @@ window.addEventListener("DOMContentLoaded", () => {
         const explosionR = projectile.isSuperBomb ? SUPER_BOMB_DRAW_RADIUS   : EXPLOSION_DRAW_RADIUS;
         carveCrater(world, projectile.x, projectile.y, craterR);
         explosion    = { x: projectile.x, y: projectile.y, radius: explosionR, startTime: timeMs };
+        triggerShake(projectile.isSuperBomb ? 12 : 6);
         projectile   = null;
         currentState = GameState.EXPLODING;
 

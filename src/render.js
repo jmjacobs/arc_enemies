@@ -6,8 +6,9 @@
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
-  COLORS,
+  THEMES,
   CHARACTER_COLORS,
+  MAX_HP,
   WIND_BAR_HEIGHT,
   WIND_ARROW_MAX_LENGTH,
   WIND_BAR_BG,
@@ -43,41 +44,57 @@ import {
 import { getLaunchPoint } from "./physics.js";
 import { CHARACTERS, drawCharacterByType } from "./characters.js";
 
-// Pre-computed stars — deterministic LCG so the field is stable across repaints.
+// Screen shake state — set by triggerShake(), consumed each frame in drawScene().
+let _shakeStart = -1e9;
+let _shakeAmp   = 0;
+const SHAKE_MS  = 380;
+
+export function triggerShake(amplitude) {
+  _shakeStart = performance.now();
+  _shakeAmp   = amplitude;
+}
+
+// Pre-computed star pool — 250 entries so every theme has enough to draw from.
 const STARS = (() => {
   const stars = [];
   let seed = 0xdeadbeef;
   const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
-  for (let i = 0; i < 160; i++) {
+  for (let i = 0; i < 250; i++) {
     stars.push({ x: rand(), y: rand() * 0.72, r: rand() * 1.2 + 0.3, a: rand() * 0.5 + 0.5 });
   }
   return stars;
 })();
 
-// Fill the whole canvas with a night-sky gradient, stars, and a horizon glow.
-export function drawSky(ctx) {
+// Fill the whole canvas with a sky gradient, stars, and a horizon glow.
+// theme defaults to THEMES[0] (neon city) when not supplied, e.g. on the character select screen.
+export function drawSky(ctx, theme = null) {
+  const t = theme ?? THEMES[0];
+
   const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-  grad.addColorStop(0, COLORS.skyTop);
-  grad.addColorStop(1, COLORS.skyBottom);
+  grad.addColorStop(0, t.skyTop);
+  grad.addColorStop(1, t.skyBottom);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-  // Stars
-  for (const s of STARS) {
+  // Stars — draw up to theme.starCount entries from the pre-computed pool.
+  const [sr, sg, sb] = t.starRgb;
+  const count = Math.min(t.starCount, STARS.length);
+  for (let i = 0; i < count; i++) {
+    const s = STARS[i];
     ctx.beginPath();
     ctx.arc(s.x * CANVAS_WIDTH, s.y * CANVAS_HEIGHT, s.r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255, 240, 255, ${s.a})`;
+    ctx.fillStyle = `rgba(${sr}, ${sg}, ${sb}, ${s.a})`;
     ctx.fill();
   }
 
-  // Horizon city-glow — warm purple bloom at the bottom of the sky.
+  // Horizon glow.
   const glow = ctx.createRadialGradient(
     CANVAS_WIDTH / 2, CANVAS_HEIGHT, 0,
     CANVAS_WIDTH / 2, CANVAS_HEIGHT, CANVAS_HEIGHT * 0.55,
   );
-  glow.addColorStop(0,   'rgba(120, 30, 160, 0.30)');
-  glow.addColorStop(0.4, 'rgba(60,  10,  90, 0.12)');
-  glow.addColorStop(1,   'rgba(0,    0,   0, 0)');
+  glow.addColorStop(0,   t.glowInner);
+  glow.addColorStop(0.4, t.glowMid);
+  glow.addColorStop(1,   'rgba(0, 0, 0, 0)');
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 }
@@ -87,54 +104,91 @@ export function drawWindIndicator(ctx, wind) {
   ctx.fillStyle = WIND_BAR_BG;
   ctx.fillRect(0, 0, CANVAS_WIDTH, WIND_BAR_HEIGHT);
 
-  const centerX = CANVAS_WIDTH / 2;
-  const centerY = WIND_BAR_HEIGHT * 0.38;  // arrow row
-  const labelY  = WIND_BAR_HEIGHT * 0.78;  // "WIND DIRECTION" row
+  const cx     = CANVAS_WIDTH / 2;
+  const arrowY = Math.round(WIND_BAR_HEIGHT * 0.74);
+  const labelY = Math.round(WIND_BAR_HEIGHT * 0.30);
+  const neon   = "#b06cff";
+  const dim    = "rgba(176, 108, 255, 0.28)";
+  const trackR = WIND_ARROW_MAX_LENGTH;
+
+  // Faint track line with tick marks at centre and extremes
+  ctx.save();
+  ctx.strokeStyle = dim;
+  ctx.lineWidth   = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx - trackR, arrowY);
+  ctx.lineTo(cx + trackR, arrowY);
+  ctx.stroke();
+  [-trackR, 0, trackR].forEach(dx => {
+    ctx.beginPath();
+    ctx.moveTo(cx + dx, arrowY - 6);
+    ctx.lineTo(cx + dx, arrowY + 6);
+    ctx.stroke();
+  });
+  ctx.restore();
+
+  // Small "WIND" header
+  ctx.save();
+  ctx.font         = "bold 16px 'Courier New', monospace";
+  ctx.fillStyle    = "rgba(176, 108, 255, 0.85)";
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("WIND", cx, labelY);
+  ctx.restore();
 
   if (wind === 0) {
-    ctx.fillStyle    = WIND_TEXT_COLOR;
-    ctx.font         = "bold 18px system-ui, sans-serif";
+    ctx.save();
+    ctx.font         = "bold 16px 'Courier New', monospace";
+    ctx.fillStyle    = "rgba(176, 108, 255, 0.75)";
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("No wind", centerX, centerY);
-    ctx.font      = "bold 14px system-ui, sans-serif";
-    ctx.fillText("WIND DIRECTION", centerX, labelY);
+    ctx.shadowColor  = neon;
+    ctx.shadowBlur   = 8;
+    ctx.fillText("— CALM —", cx, arrowY);
+    ctx.restore();
     return;
   }
 
-  const arrowLength = (Math.abs(wind) / WIND_MAX) * WIND_ARROW_MAX_LENGTH;
-  const direction   = wind > 0 ? 1 : -1;
-  const arrowEndX   = centerX + direction * arrowLength;
+  const arrowLen = (Math.abs(wind) / WIND_MAX) * trackR;
+  const dir      = wind > 0 ? 1 : -1;
+  const endX     = cx + dir * arrowLen;
 
+  // Glowing arrow shaft
   ctx.save();
-  ctx.strokeStyle = WIND_ARROW_COLOR;
-  ctx.lineWidth   = 5;
+  ctx.shadowColor = neon;
+  ctx.shadowBlur  = 16;
+  ctx.strokeStyle = neon;
+  ctx.lineWidth   = 6;
   ctx.lineCap     = "round";
   ctx.beginPath();
-  ctx.moveTo(centerX, centerY);
-  ctx.lineTo(arrowEndX, centerY);
+  ctx.moveTo(cx, arrowY);
+  ctx.lineTo(endX - dir * 22, arrowY);
   ctx.stroke();
+  ctx.restore();
 
-  const headSize = 14;
+  // Arrowhead
+  ctx.save();
+  ctx.shadowColor = neon;
+  ctx.shadowBlur  = 14;
+  ctx.fillStyle   = neon;
   ctx.beginPath();
-  ctx.moveTo(arrowEndX, centerY);
-  ctx.lineTo(arrowEndX - direction * headSize, centerY - headSize * 0.6);
-  ctx.lineTo(arrowEndX - direction * headSize, centerY + headSize * 0.6);
+  ctx.moveTo(endX,              arrowY);
+  ctx.lineTo(endX - dir * 22,  arrowY - 13);
+  ctx.lineTo(endX - dir * 22,  arrowY + 13);
   ctx.closePath();
-  ctx.fillStyle = WIND_ARROW_COLOR;
   ctx.fill();
   ctx.restore();
 
-  const labelX = arrowEndX + direction * 16;
-  ctx.fillStyle    = WIND_TEXT_COLOR;
-  ctx.font         = "bold 18px system-ui, sans-serif";
-  ctx.textAlign    = wind > 0 ? "left" : "right";
+  // Wind value in monospace with glow
+  ctx.save();
+  ctx.shadowColor  = neon;
+  ctx.shadowBlur   = 10;
+  ctx.font         = "bold 18px 'Courier New', monospace";
+  ctx.fillStyle    = neon;
+  ctx.textAlign    = dir > 0 ? "left" : "right";
   ctx.textBaseline = "middle";
-  ctx.fillText(wind.toFixed(1), labelX, centerY);
-
-  ctx.font      = "bold 14px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("WIND DIRECTION", centerX, labelY);
+  ctx.fillText(wind.toFixed(1), endX + dir * 16, arrowY);
+  ctx.restore();
 }
 
 // Draw pill-shaped score badges in the wind bar — P1 left, P2 right.
@@ -662,6 +716,34 @@ export function drawCharacterSelect(ctx, { charSelectPhase, charPreview, playerN
   ctx.fillText("CONFIRM  ▶", CANVAS_WIDTH / 2, btnY + btnH / 2);
 }
 
+// Draw HP pips above a character. playerIndex 0 = P1 (orange), 1 = P2 (cyan).
+function drawHealthBar(ctx, character, playerHp, playerIndex) {
+  const pipW   = 11, pipH = 9, pipGap = 3;
+  const totalW = MAX_HP * pipW + (MAX_HP - 1) * pipGap;
+  const cx     = character.x + character.width / 2;
+  const barY   = character.y - 30;
+  const startX = Math.round(cx - totalW / 2);
+  const color  = playerIndex === 0 ? CHARACTER_COLORS.player1 : CHARACTER_COLORS.player2;
+
+  for (let i = 0; i < MAX_HP; i++) {
+    const px     = startX + i * (pipW + pipGap);
+    const filled = i < playerHp;
+    ctx.save();
+    if (filled) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur  = 8;
+      ctx.fillStyle   = color;
+    } else {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    }
+    ctx.fillRect(px, barY, pipW, pipH);
+    ctx.strokeStyle = filled ? color : 'rgba(255,255,255,0.15)';
+    ctx.lineWidth   = 1;
+    ctx.strokeRect(px + 0.5, barY + 0.5, pipW - 1, pipH - 1);
+    ctx.restore();
+  }
+}
+
 // Draw the full scene every frame.
 //
 // Draw order:
@@ -694,8 +776,20 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
   superBombArmed      = false,
   playerNames         = ["Player 1", "Player 2"],
   parallelData        = null,
+  hp                  = [MAX_HP, MAX_HP],
 } = {}) {
-  drawSky(ctx);
+  const _shakeElapsed = performance.now() - _shakeStart;
+  const _shaking      = _shakeElapsed < SHAKE_MS;
+  if (_shaking) {
+    const decay = 1 - _shakeElapsed / SHAKE_MS;
+    ctx.save();
+    ctx.translate(
+      Math.sin(_shakeElapsed * 0.28) * _shakeAmp * decay,
+      Math.cos(_shakeElapsed * 0.23) * _shakeAmp * decay,
+    );
+  }
+
+  drawSky(ctx, world.theme);
   drawWindIndicator(ctx, world.wind);
   drawScoreboard(ctx, roundWinsByPlayer, playerNames);
   drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, activePlayerIndex);
@@ -708,6 +802,7 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
       const pose = parallelData.isArmUp[i] ? "armUp" : "idle";
       drawCharacter(ctx, world.characters[i], pose);
     }
+    for (let i = 0; i < 2; i++) drawHealthBar(ctx, world.characters[i], hp[i], i);
     // Aim lines for each player who is still aiming
     for (let i = 0; i < 2; i++) {
       if (parallelData.showAimLine[i] && parallelData.aims[i]) {
@@ -728,6 +823,7 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
       const pose = (isArmUp && i === throwingPlayerIndex) ? "armUp" : "idle";
       drawCharacter(ctx, world.characters[i], pose);
     }
+    for (let i = 0; i < 2; i++) drawHealthBar(ctx, world.characters[i], hp[i], i);
     if (showAimLine && aim) {
       drawAimLine(ctx, world.characters[activePlayerIndex], aim.angle, aim.velocity, superBombArmed);
     }
@@ -763,4 +859,6 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
   } else if (matchBannerWinner >= 0) {
     drawMatchBanner(ctx, matchBannerWinner, roundWinsByPlayer, playerNames);
   }
+
+  if (_shaking) ctx.restore();
 }

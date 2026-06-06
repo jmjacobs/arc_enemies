@@ -138,6 +138,10 @@ export const CHARACTER_HIT_PADDING = 6;
 // When sampling a pixel from the city canvas, alpha above this value means "solid building".
 export const BUILDING_HIT_ALPHA_THRESHOLD = 200;
 
+// HP each character starts each round with.
+// Direct hits deal 1 damage; super bombs deal 2.
+export const MAX_HP = 3;
+
 // How many round wins it takes to claim the whole match.
 // Change this to 1 or 2 for shorter matches, 5 for longer ones.
 export const MATCH_WIN_THRESHOLD = 3;
@@ -160,11 +164,66 @@ export const SCOREBOARD_MARGIN_X = 16;
 
 // All the colours used in the game.
 export const COLORS = {
-  skyTop:    "#0e0020",  // deep purple at the top
-  skyBottom: "#050514",  // near-black blue at the horizon
+  skyTop:    "#0e0020",
+  skyBottom: "#050514",
   title:     "#ffffff",
   border:    "#ffffff",
 };
+
+// World themes — cycled each round.
+// palette:    building fill colours
+// winLit:     lit window colour
+// winDark:    unlit window colour
+// winLitProb: fraction of windows that are lit
+// roofline:   thin roof-edge highlight colour
+// skyTop/skyBottom: sky gradient end stops
+// glowInner/glowMid: two stops of the horizon radial glow
+// starRgb:    [r,g,b] tint for stars
+// starCount:  how many stars to draw (out of a pool of 250)
+export const THEMES = [
+  {
+    name:        'NEON CITY',
+    skyTop:      '#0e0020',
+    skyBottom:   '#050514',
+    glowInner:   'rgba(120,  30, 160, 0.30)',
+    glowMid:     'rgba( 60,  10,  90, 0.12)',
+    palette:     ['#5c1a5c', '#0d4070', '#1e2d5a'],
+    winLit:      '#ffc84a',
+    winDark:     '#06061a',
+    winLitProb:  0.35,
+    roofline:    'rgba(255,255,255,0.30)',
+    starRgb:     [255, 240, 255],
+    starCount:   160,
+  },
+  {
+    name:        'ROCKY CANYON',
+    skyTop:      '#060108',
+    skyBottom:   '#1c0600',
+    glowInner:   'rgba(220,  80,  10, 0.40)',
+    glowMid:     'rgba(130,  40,   5, 0.18)',
+    palette:     ['#5e1a08', '#7c2c10', '#3e1406'],
+    winLit:      '#ff8c30',
+    winDark:     '#100400',
+    winLitProb:  0.15,
+    roofline:    'rgba(255,180, 80, 0.22)',
+    starRgb:     [255, 220, 190],
+    starCount:   100,
+  },
+  {
+    name:        'SPACE STATION',
+    skyTop:      '#000008',
+    skyBottom:   '#010215',
+    glowInner:   'rgba(  0, 130, 255, 0.24)',
+    glowMid:     'rgba(  0,  60, 160, 0.10)',
+    palette:     ['#0e1e2e', '#162232', '#1c1030'],
+    winLit:      '#44ffaa',
+    winDark:     '#010510',
+    winLitProb:  0.50,
+    roofline:    'rgba( 80,255,180, 0.22)',
+    starRgb:     [210, 230, 255],
+    starCount:   240,
+  },
+];
 
 // Which game mode is active.
 // SEQUENTIAL = players take turns (classic mode)

@@ -14,20 +14,17 @@ import {
   BUILDING_COUNT_MAX,
   BUILDING_MIN_HEIGHT,
   BUILDING_MAX_HEIGHT,
-  BUILDING_PALETTE,
   WINDOW_WIDTH,
   WINDOW_HEIGHT,
   WINDOW_GAP_X,
   WINDOW_GAP_Y,
   WINDOW_MARGIN,
-  WINDOW_LIT_COLOR,
-  WINDOW_DARK_COLOR,
-  WINDOW_LIT_PROBABILITY,
   CHARACTER_WIDTH,
   CHARACTER_HEIGHT,
   CHARACTER_COLORS,
   WIND_MIN,
   WIND_MAX,
+  THEMES,
 } from "./config.js";
 
 // Pick a random whole number between min and max (inclusive).
@@ -37,7 +34,7 @@ function randomInt(min, max) {
 
 // Build the grid of windows for one building.
 // Returns a 2D array: windows[row][col] is true if that window is lit.
-function generateWindows(buildingWidth, buildingHeight) {
+function generateWindows(buildingWidth, buildingHeight, litProb) {
   const usableWidth  = buildingWidth  - WINDOW_MARGIN * 2;
   const usableHeight = buildingHeight - WINDOW_MARGIN * 2;
 
@@ -48,7 +45,7 @@ function generateWindows(buildingWidth, buildingHeight) {
   for (let row = 0; row < rows; row++) {
     const rowData = [];
     for (let col = 0; col < columns; col++) {
-      rowData.push(Math.random() < WINDOW_LIT_PROBABILITY);
+      rowData.push(Math.random() < litProb);
     }
     grid.push(rowData);
   }
@@ -83,7 +80,7 @@ function drawBuildingToCtx(ctx, building) {
     for (let col = 0; col < grid[row].length; col++) {
       const windowX = building.x + WINDOW_MARGIN + col * (WINDOW_WIDTH  + WINDOW_GAP_X);
       const windowY = building.y + WINDOW_MARGIN + row * (WINDOW_HEIGHT + WINDOW_GAP_Y);
-      ctx.fillStyle = grid[row][col] ? WINDOW_LIT_COLOR : WINDOW_DARK_COLOR;
+      ctx.fillStyle = grid[row][col] ? building.winLit : building.winDark;
       ctx.fillRect(windowX, windowY, WINDOW_WIDTH, WINDOW_HEIGHT);
     }
   }
@@ -96,8 +93,8 @@ function drawBuildingToCtx(ctx, building) {
   ctx.fillStyle = shade;
   ctx.fillRect(building.x, building.y, building.width, building.height);
 
-  // Bright roofline — thin highlight so each building edge reads clearly.
-  ctx.fillStyle = 'rgba(255,255,255,0.30)';
+  // Roofline highlight — colour comes from the theme.
+  ctx.fillStyle = building.roofline;
   ctx.fillRect(building.x, building.y, building.width, 2);
 }
 
@@ -105,7 +102,7 @@ function drawBuildingToCtx(ctx, building) {
 // The offscreen canvas is what gets drawn to the screen each frame — fast,
 // because we only repaint individual pixels when a crater is carved.
 // Returns { buildings, canvas, ctx } where canvas is the offscreen element.
-function generateCity() {
+function generateCity(theme) {
   const count  = randomInt(BUILDING_COUNT_MIN, BUILDING_COUNT_MAX);
   const widths = generateBuildingWidths(count, CANVAS_WIDTH);
 
@@ -119,17 +116,20 @@ function generateCity() {
 
     let colorIndex;
     do {
-      colorIndex = randomInt(0, BUILDING_PALETTE.length - 1);
-    } while (colorIndex === lastColorIndex && BUILDING_PALETTE.length > 1);
+      colorIndex = randomInt(0, theme.palette.length - 1);
+    } while (colorIndex === lastColorIndex && theme.palette.length > 1);
     lastColorIndex = colorIndex;
 
     buildings.push({
-      x:       currentX,
-      y:       GROUND_Y - buildingHeight,
-      width:   buildingWidth,
-      height:  buildingHeight,
-      color:   BUILDING_PALETTE[colorIndex],
-      windows: generateWindows(buildingWidth, buildingHeight),
+      x:        currentX,
+      y:        GROUND_Y - buildingHeight,
+      width:    buildingWidth,
+      height:   buildingHeight,
+      color:    theme.palette[colorIndex],
+      winLit:   theme.winLit,
+      winDark:  theme.winDark,
+      roofline: theme.roofline,
+      windows:  generateWindows(buildingWidth, buildingHeight, theme.winLitProb),
     });
 
     currentX += buildingWidth;
@@ -206,14 +206,15 @@ export function carveCrater(world, x, y, radius) {
 }
 
 // Generate the whole world: city, characters, and wind.
-// This is the main function that game.js calls to set everything up.
-export function generateWorld() {
-  const city = generateCity(); // { buildings, canvas, ctx }
+// themeIndex cycles through THEMES each round.
+export function generateWorld(themeIndex = 0) {
+  const theme = THEMES[themeIndex % THEMES.length];
+  const city  = generateCity(theme);
   const { leftIndex, rightIndex } = pickCharacterBuildings(city.buildings);
 
   const leftCharacter  = placeCharacter(city.buildings[leftIndex],  CHARACTER_COLORS.player1, 1, true);
   const rightCharacter = placeCharacter(city.buildings[rightIndex], CHARACTER_COLORS.player2, 2, false);
   const wind           = generateWind();
 
-  return { city, characters: [leftCharacter, rightCharacter], wind };
+  return { city, characters: [leftCharacter, rightCharacter], wind, theme };
 }
