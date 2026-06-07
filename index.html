@@ -20,9 +20,8 @@
     const GAME_W = 1280, GAME_H = 720;
     function scaleCanvas() {
       const scale = Math.min(
-        window.innerWidth  / (GAME_W + 2),
-        window.innerHeight / (GAME_H + 2),
-        1
+        window.innerWidth  / GAME_W,
+        window.innerHeight / GAME_H
       );
       document.getElementById("game").style.transform = `scale(${scale})`;
     }

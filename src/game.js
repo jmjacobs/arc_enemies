@@ -25,6 +25,9 @@ import {
   TUNNEL_BOMB_DRAW_RADIUS,
   TUNNEL_BOMB_MAX_DRILL_PX,
   TUNNEL_BOMB_DRILL_SPEED_FACTOR,
+  FREEZE_BOMB_BLOCK_SIZE,
+  FREEZE_BOMB_BLOCK_COLOR,
+  FREEZE_BOMB_EXPAND_DURATION_MS,
   THEMES,
   MAX_HP,
   RELOAD_COOLDOWN_MS,
@@ -59,12 +62,13 @@ window.addEventListener("DOMContentLoaded", () => {
   let roundIndex              = 0;
   let hp                      = [MAX_HP, MAX_HP];
   let tunnelBombAvailable     = [true, true];
+  let freezeBombAvailable     = [true, true];
   let activePlayerIndex       = 0;
   let roundWinner             = -1;
   let roundWinsByPlayer       = [0, 0];
   let matchWinner             = null;
   let roundEndBannerStartTime = null;
-  let superBombAvailable      = [true, true];
+  let superBombAvailable      = [2, 2];
 
   // ── Sequential-only state ───────────────────────────────────────────────────
   let throwingPlayerIndex = 0;
@@ -76,6 +80,7 @@ window.addEventListener("DOMContentLoaded", () => {
   let armUpTimer          = null;
   let superBombArmed      = false;
   let tunnelBombArmed     = false;
+  let freezeBombArmed     = false;
   let cyclePhase          = 'angle';
   let cycleStartTime      = null;
   let lockedAngle         = 0;
@@ -93,12 +98,37 @@ window.addEventListener("DOMContentLoaded", () => {
     reloadAt:       0,    // performance.now() timestamp when canFire becomes true
     superBombArmed:  false,
     tunnelBombArmed: false,
+    freezeBombArmed: false,
     canFire:         true,
   });
   let par               = [parInit(), parInit()];
   let parallelRoundOver = false;
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
+  function paintFreezeBlock(offCtx, cx, cy) {
+    const hs = FREEZE_BOMB_BLOCK_SIZE / 2;
+
+    // Main body gradient — offset so it feels lit from top-left
+    const grad = offCtx.createRadialGradient(cx - hs * 0.25, cy - hs * 0.25, 0, cx, cy, hs * 1.3);
+    grad.addColorStop(0,    '#9ad4f5');
+    grad.addColorStop(0.35, '#2e6fbb');
+    grad.addColorStop(0.75, '#1a4e99');
+    grad.addColorStop(1,    '#0d3066');
+    offCtx.fillStyle = grad;
+    offCtx.beginPath();
+    offCtx.roundRect(cx - hs, cy - hs, FREEZE_BOMB_BLOCK_SIZE, FREEZE_BOMB_BLOCK_SIZE, 10);
+    offCtx.fill();
+
+    // Top-left specular highlight
+    const hi = offCtx.createRadialGradient(cx - hs * 0.5, cy - hs * 0.5, 0, cx - hs * 0.2, cy - hs * 0.2, hs * 0.8);
+    hi.addColorStop(0,   'rgba(255, 255, 255, 0.28)');
+    hi.addColorStop(1,   'rgba(255, 255, 255, 0)');
+    offCtx.fillStyle = hi;
+    offCtx.beginPath();
+    offCtx.roundRect(cx - hs, cy - hs, FREEZE_BOMB_BLOCK_SIZE, FREEZE_BOMB_BLOCK_SIZE, 10);
+    offCtx.fill();
+  }
+
   function triangleWave(elapsedMs, maxValue, speed) {
     const periodMs   = (2 * maxValue / speed) * 1000;
     const t          = elapsedMs % periodMs;
@@ -107,7 +137,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function buildWorld() {
-    world = generateWorld(roundIndex % THEMES.length);
+    world = generateWorld(Math.floor(Math.random() * THEMES.length));
     hp    = [MAX_HP, MAX_HP];
     console.log(`wind:${world.wind}`);
     world.characters[0].charType = charPreview[0];
@@ -141,6 +171,8 @@ window.addEventListener("DOMContentLoaded", () => {
         superBombArmed:    [par[0].superBombArmed,  par[1].superBombArmed],
         tunnelBombAvailable,
         tunnelBombArmed:   [par[0].tunnelBombArmed, par[1].tunnelBombArmed],
+        freezeBombAvailable,
+        freezeBombArmed:   [par[0].freezeBombArmed, par[1].freezeBombArmed],
         playerNames,
         parallelData,
         hp,
@@ -165,36 +197,45 @@ window.addEventListener("DOMContentLoaded", () => {
       superBombArmed,
       tunnelBombAvailable,
       tunnelBombArmed,
+      freezeBombAvailable,
+      freezeBombArmed,
       playerNames,
       hp,
     });
   }
 
-  // Returns the next armed state when cycling through bomb types.
-  // Order: normal → super (if avail) → tunnel (if avail) → normal.
-  function cycleBomb(superAvail, tunnelAvail, superArmed, tunnelArmed) {
+  function cycleBomb(superAvail, tunnelAvail, freezeAvail, superArmed, tunnelArmed, freezeArmed) {
     if (superArmed) {
-      if (tunnelAvail) return { superArmed: false, tunnelArmed: true,  sound: "superBombArm"    };
-      return                  { superArmed: false, tunnelArmed: false, sound: "superBombDisarm" };
+      if (tunnelAvail)  return { superArmed: false, tunnelArmed: true,  freezeArmed: false, sound: "superBombArm"    };
+      if (freezeAvail)  return { superArmed: false, tunnelArmed: false, freezeArmed: true,  sound: "superBombArm"    };
+      return                   { superArmed: false, tunnelArmed: false, freezeArmed: false, sound: "superBombDisarm" };
     }
     if (tunnelArmed) {
-      return                  { superArmed: false, tunnelArmed: false, sound: "superBombDisarm" };
+      if (freezeAvail)  return { superArmed: false, tunnelArmed: false, freezeArmed: true,  sound: "superBombArm"    };
+      return                   { superArmed: false, tunnelArmed: false, freezeArmed: false, sound: "superBombDisarm" };
     }
-    if (superAvail)  return   { superArmed: true,  tunnelArmed: false, sound: "superBombArm"    };
-    if (tunnelAvail) return   { superArmed: false,  tunnelArmed: true, sound: "superBombArm"    };
-    return                    { superArmed: false, tunnelArmed: false, sound: null };
+    if (freezeArmed) {
+      return                   { superArmed: false, tunnelArmed: false, freezeArmed: false, sound: "superBombDisarm" };
+    }
+    if (superAvail)   return   { superArmed: true,  tunnelArmed: false, freezeArmed: false, sound: "superBombArm"    };
+    if (tunnelAvail)  return   { superArmed: false, tunnelArmed: true,  freezeArmed: false, sound: "superBombArm"    };
+    if (freezeAvail)  return   { superArmed: false, tunnelArmed: false, freezeArmed: true,  sound: "superBombArm"    };
+    return                     { superArmed: false, tunnelArmed: false, freezeArmed: false, sound: null };
   }
 
   // ── Sequential functions ────────────────────────────────────────────────────
   function handleThrow({ angle, velocity }) {
     const isSuperBomb  = superBombArmed;
     const isTunnelBomb = tunnelBombArmed;
+    const isFreezeBomb = freezeBombArmed;
     playSound(isSuperBomb ? "throwSuper" : "throw");
     superBombArmed      = false;
     tunnelBombArmed     = false;
+    freezeBombArmed     = false;
     seqAimingForReload  = false;
-    if (isSuperBomb)  superBombAvailable[activePlayerIndex]  = false;
+    if (isSuperBomb)  superBombAvailable[activePlayerIndex]--;
     if (isTunnelBomb) tunnelBombAvailable[activePlayerIndex] = false;
+    if (isFreezeBomb) freezeBombAvailable[activePlayerIndex] = false;
 
     setInputEnabled(false);
     if (currentState !== GameState.RESOLVING) {
@@ -210,7 +251,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const facing    = character.facingRight ? 1 : -1;
       const { x: launchX, y: launchY } = getLaunchPoint(character);
       const { vx, vy } = launchVelocity(angle, velocity, facing);
-      projectiles.push({ x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb, isTunnelBomb, drillPx: 0 });
+      projectiles.push({ x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb, isTunnelBomb, isFreezeBomb, frozen: false, frozenAt: 0, drillPx: 0 });
       seqReloadAt = performance.now() + RELOAD_COOLDOWN_MS;
     }, ARM_UP_DURATION_MS);
   }
@@ -218,6 +259,7 @@ window.addEventListener("DOMContentLoaded", () => {
   function nextTurn() {
     superBombArmed      = false;
     tunnelBombArmed     = false;
+    freezeBombArmed     = false;
     cyclePhase          = 'angle';
     cycleStartTime      = null;
     lockedAngle         = 0;
@@ -232,6 +274,18 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function handleSpacePress() {
+    if (gameMode === GameMode.SEQUENTIAL && currentState === GameState.RESOLVING) {
+      const fp = projectiles.find(p => p.isFreezeBomb && !p.frozen);
+      if (fp) {
+        fp.frozen   = true;
+        fp.frozenAt = performance.now();
+        fp.vx       = 0;
+        fp.vy       = 0;
+        fp.trail    = [];
+        playSound("freezeActivate");
+        return;
+      }
+    }
     if (gameMode === GameMode.PARALLEL) return;
     const canAct = (currentState === GameState.PLAYER_TURN || (currentState === GameState.RESOLVING && seqAimingForReload)) && !isArmUp;
     if (!canAct) return;
@@ -257,10 +311,13 @@ window.addEventListener("DOMContentLoaded", () => {
   function fireParallelProjectile(p, angle, velocity) {
     const isSuperBomb  = par[p].superBombArmed;
     const isTunnelBomb = par[p].tunnelBombArmed;
+    const isFreezeBomb = par[p].freezeBombArmed;
     par[p].superBombArmed  = false;
     par[p].tunnelBombArmed = false;
-    if (isSuperBomb)  superBombAvailable[p]  = false;
+    par[p].freezeBombArmed = false;
+    if (isSuperBomb)  superBombAvailable[p]--;
     if (isTunnelBomb) tunnelBombAvailable[p] = false;
+    if (isFreezeBomb) freezeBombAvailable[p] = false;
 
     playSound(isSuperBomb ? "throwSuper" : "throw");
     par[p].canFire = false;
@@ -273,12 +330,22 @@ window.addEventListener("DOMContentLoaded", () => {
       const facing    = character.facingRight ? 1 : -1;
       const { x: launchX, y: launchY } = getLaunchPoint(character);
       const { vx, vy } = launchVelocity(angle, velocity, facing);
-      par[p].projectiles.push({ x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb, isTunnelBomb, drillPx: 0 });
+      par[p].projectiles.push({ x: launchX, y: launchY, vx, vy, spin: 0, trail: [], framesAlive: 0, isSuperBomb, isTunnelBomb, isFreezeBomb, frozen: false, frozenAt: 0, drillPx: 0 });
       par[p].reloadAt = performance.now() + RELOAD_COOLDOWN_MS;
     }, ARM_UP_DURATION_MS);
   }
 
   function handleParallelShift(p) {
+    const fp = par[p].projectiles.find(pr => pr.isFreezeBomb && !pr.frozen);
+    if (fp && !parallelRoundOver) {
+      fp.frozen   = true;
+      fp.frozenAt = performance.now();
+      fp.vx       = 0;
+      fp.vy       = 0;
+      fp.trail    = [];
+      playSound("freezeActivate");
+      return;
+    }
     if (currentState !== GameState.PLAYER_TURN || parallelRoundOver) return;
     if (!par[p].canFire || par[p].isArmUp) return;
 
@@ -388,8 +455,9 @@ window.addEventListener("DOMContentLoaded", () => {
     activePlayerIndex       = loserIndex;
     roundWinner             = -1;
     roundEndBannerStartTime = null;
-    superBombAvailable      = [true, true];
+    superBombAvailable      = [2, 2];
     tunnelBombAvailable     = [true, true];
+    freezeBombAvailable     = [true, true];
 
     if (gameMode === GameMode.PARALLEL) {
       resetParallelState();
@@ -397,6 +465,7 @@ window.addEventListener("DOMContentLoaded", () => {
     } else {
       superBombArmed      = false;
       tunnelBombArmed     = false;
+      freezeBombArmed     = false;
       cyclePhase          = 'angle';
       cycleStartTime      = null;
       lockedAngle         = 0;
@@ -425,10 +494,12 @@ window.addEventListener("DOMContentLoaded", () => {
     roundWinsByPlayer       = [0, 0];
     matchWinner             = null;
     roundEndBannerStartTime = null;
-    superBombAvailable      = [true, true];
+    superBombAvailable      = [2, 2];
     tunnelBombAvailable     = [true, true];
+    freezeBombAvailable     = [true, true];
     superBombArmed          = false;
     tunnelBombArmed         = false;
+    freezeBombArmed         = false;
     cyclePhase              = 'angle';
     cycleStartTime          = null;
     lockedAngle             = 0;
@@ -515,17 +586,19 @@ window.addEventListener("DOMContentLoaded", () => {
       } else if ((event.key === "s" || event.key === "S") &&
                  currentState === GameState.PLAYER_TURN && !parallelRoundOver &&
                  par[0].canFire && !par[0].isArmUp) {
-        const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], par[0].superBombArmed, par[0].tunnelBombArmed);
+        const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], freezeBombAvailable[0], par[0].superBombArmed, par[0].tunnelBombArmed, par[0].freezeBombArmed);
         par[0].superBombArmed  = r.superArmed;
         par[0].tunnelBombArmed = r.tunnelArmed;
+        par[0].freezeBombArmed = r.freezeArmed;
         if (r.sound) playSound(r.sound);
         redraw();
       } else if ((event.key === "l" || event.key === "L") &&
                  currentState === GameState.PLAYER_TURN && !parallelRoundOver &&
                  par[1].canFire && !par[1].isArmUp) {
-        const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], par[1].superBombArmed, par[1].tunnelBombArmed);
+        const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], freezeBombAvailable[1], par[1].superBombArmed, par[1].tunnelBombArmed, par[1].freezeBombArmed);
         par[1].superBombArmed  = r.superArmed;
         par[1].tunnelBombArmed = r.tunnelArmed;
+        par[1].freezeBombArmed = r.freezeArmed;
         if (r.sound) playSound(r.sound);
         redraw();
       }
@@ -535,9 +608,10 @@ window.addEventListener("DOMContentLoaded", () => {
     if ((event.key === "s" || event.key === "S") &&
         (currentState === GameState.PLAYER_TURN || (currentState === GameState.RESOLVING && seqAimingForReload)) &&
         !isArmUp) {
-      const r = cycleBomb(superBombAvailable[activePlayerIndex], tunnelBombAvailable[activePlayerIndex], superBombArmed, tunnelBombArmed);
+      const r = cycleBomb(superBombAvailable[activePlayerIndex], tunnelBombAvailable[activePlayerIndex], freezeBombAvailable[activePlayerIndex], superBombArmed, tunnelBombArmed, freezeBombArmed);
       superBombArmed  = r.superArmed;
       tunnelBombArmed = r.tunnelArmed;
+      freezeBombArmed = r.freezeArmed;
       if (r.sound) playSound(r.sound);
       redraw();
     }
@@ -579,16 +653,18 @@ window.addEventListener("DOMContentLoaded", () => {
         if (cx >= p1BtnX && cx <= p1BtnX + SB_BTN_W) {
           if (gameMode === GameMode.PARALLEL) {
             if (!parallelRoundOver && par[0].canFire && !par[0].isArmUp) {
-              const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], par[0].superBombArmed, par[0].tunnelBombArmed);
+              const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], freezeBombAvailable[0], par[0].superBombArmed, par[0].tunnelBombArmed, par[0].freezeBombArmed);
               par[0].superBombArmed  = r.superArmed;
               par[0].tunnelBombArmed = r.tunnelArmed;
+              par[0].freezeBombArmed = r.freezeArmed;
               if (r.sound) playSound(r.sound);
               redraw();
             }
           } else if (activePlayerIndex === 0 && !isArmUp) {
-            const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], superBombArmed, tunnelBombArmed);
+            const r = cycleBomb(superBombAvailable[0], tunnelBombAvailable[0], freezeBombAvailable[0], superBombArmed, tunnelBombArmed, freezeBombArmed);
             superBombArmed  = r.superArmed;
             tunnelBombArmed = r.tunnelArmed;
+            freezeBombArmed = r.freezeArmed;
             if (r.sound) playSound(r.sound);
             redraw();
           }
@@ -598,16 +674,18 @@ window.addEventListener("DOMContentLoaded", () => {
         if (cx >= p2BtnX && cx <= p2BtnX + SB_BTN_W) {
           if (gameMode === GameMode.PARALLEL) {
             if (!parallelRoundOver && par[1].canFire && !par[1].isArmUp) {
-              const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], par[1].superBombArmed, par[1].tunnelBombArmed);
+              const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], freezeBombAvailable[1], par[1].superBombArmed, par[1].tunnelBombArmed, par[1].freezeBombArmed);
               par[1].superBombArmed  = r.superArmed;
               par[1].tunnelBombArmed = r.tunnelArmed;
+              par[1].freezeBombArmed = r.freezeArmed;
               if (r.sound) playSound(r.sound);
               redraw();
             }
           } else if (activePlayerIndex === 1 && !isArmUp) {
-            const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], superBombArmed, tunnelBombArmed);
+            const r = cycleBomb(superBombAvailable[1], tunnelBombAvailable[1], freezeBombAvailable[1], superBombArmed, tunnelBombArmed, freezeBombArmed);
             superBombArmed  = r.superArmed;
             tunnelBombArmed = r.tunnelArmed;
+            freezeBombArmed = r.freezeArmed;
             if (r.sound) playSound(r.sound);
             redraw();
           }
@@ -666,6 +744,13 @@ window.addEventListener("DOMContentLoaded", () => {
           const inBuildingPar = proj.isTunnelBomb &&
             world.city.buildings.find(b => proj.x >= b.x && proj.x < b.x + b.width && proj.y >= b.y);
           const effectiveDtPar = inBuildingPar ? dt * TUNNEL_BOMB_DRILL_SPEED_FACTOR : dt;
+          if (proj.frozen) {
+            if (timeMs - proj.frozenAt >= FREEZE_BOMB_EXPAND_DURATION_MS) {
+              paintFreezeBlock(world.city.ctx, Math.round(proj.x), Math.round(proj.y));
+              par[p].projectiles.splice(j, 1);
+            }
+            continue;
+          }
           stepProjectile(proj, world.wind, effectiveDtPar);
           const enemy = 1 - p;
 
@@ -760,6 +845,13 @@ window.addEventListener("DOMContentLoaded", () => {
         const inBuildingSeq = proj.isTunnelBomb &&
           world.city.buildings.find(b => proj.x >= b.x && proj.x < b.x + b.width && proj.y >= b.y);
         const effectiveDtSeq = inBuildingSeq ? dt * TUNNEL_BOMB_DRILL_SPEED_FACTOR : dt;
+        if (proj.frozen) {
+          if (timeMs - proj.frozenAt >= FREEZE_BOMB_EXPAND_DURATION_MS) {
+            paintFreezeBlock(world.city.ctx, Math.round(proj.x), Math.round(proj.y));
+            projectiles.splice(j, 1);
+          }
+          continue;
+        }
         stepProjectile(proj, world.wind, effectiveDtSeq);
 
         let hitCharIndex = -1;

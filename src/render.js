@@ -36,6 +36,11 @@ import {
   SUPER_BOMB_PROJECTILE_COLOR,
   TUNNEL_BOMB_PROJECTILE_RADIUS,
   TUNNEL_BOMB_PROJECTILE_COLOR,
+  FREEZE_BOMB_PROJECTILE_RADIUS,
+  FREEZE_BOMB_PROJECTILE_COLOR,
+  FREEZE_BOMB_BLOCK_SIZE,
+  FREEZE_BOMB_BLOCK_COLOR,
+  FREEZE_BOMB_EXPAND_DURATION_MS,
   BANNER_BG_RGBA,
   BANNER_HEIGHT,
   BANNER_TITLE_FONT,
@@ -242,12 +247,19 @@ export function drawCharacter(ctx, character, pose = "idle") {
 // Draw the flying projectile plus its fading trail.
 export function drawProjectile(ctx, projectile) {
   const isSuperBomb  = projectile.isSuperBomb;
-  const isTunnelBomb = projectile.isTunnelBomb;
-  const color  = isSuperBomb ? SUPER_BOMB_PROJECTILE_COLOR  : (isTunnelBomb ? TUNNEL_BOMB_PROJECTILE_COLOR  : PROJECTILE_COLOR);
-  const radius = isSuperBomb ? SUPER_BOMB_PROJECTILE_RADIUS : (isTunnelBomb ? TUNNEL_BOMB_PROJECTILE_RADIUS : PROJECTILE_RADIUS);
-  const trailR = isSuperBomb ? 255 : (isTunnelBomb ? 170 : 255);
-  const trailG = isSuperBomb ?  40 : (isTunnelBomb ? 221 : 216);
-  const trailB = isSuperBomb ?  40 : (isTunnelBomb ? 255 :  77);
+  const isTunnelBomb  = projectile.isTunnelBomb;
+  const isFreezeBomb  = projectile.isFreezeBomb;
+  const color  = isSuperBomb  ? SUPER_BOMB_PROJECTILE_COLOR
+               : isTunnelBomb ? TUNNEL_BOMB_PROJECTILE_COLOR
+               : isFreezeBomb ? FREEZE_BOMB_PROJECTILE_COLOR
+               : PROJECTILE_COLOR;
+  const radius = isSuperBomb  ? SUPER_BOMB_PROJECTILE_RADIUS
+               : isTunnelBomb ? TUNNEL_BOMB_PROJECTILE_RADIUS
+               : isFreezeBomb ? FREEZE_BOMB_PROJECTILE_RADIUS
+               : PROJECTILE_RADIUS;
+  const trailR = isSuperBomb ? 255 : isTunnelBomb ? 170 : isFreezeBomb ? 200 : 255;
+  const trailG = isSuperBomb ?  40 : isTunnelBomb ? 221 : isFreezeBomb ? 240 : 216;
+  const trailB = isSuperBomb ?  40 : isTunnelBomb ? 255 : isFreezeBomb ? 255 :  77;
 
   for (let i = 0; i < projectile.trail.length; i++) {
     const point     = projectile.trail[i];
@@ -335,6 +347,45 @@ export function drawHint(ctx) {
   ctx.fillText(HINT_TEXT, 10, WIND_BAR_HEIGHT + 40);
 }
 
+function drawFreezeBlock(ctx, proj, timeMs) {
+  const elapsed  = timeMs - proj.frozenAt;
+  const progress = Math.min(elapsed / FREEZE_BOMB_EXPAND_DURATION_MS, 1);
+  const size     = FREEZE_BOMB_BLOCK_SIZE * progress;
+  const half     = size / 2;
+  const corner   = Math.max(2, 12 * progress);
+  const cx = proj.x, cy = proj.y;
+
+  ctx.save();
+
+  // Soft outer glow — blue, not white
+  ctx.shadowColor = '#2266cc';
+  ctx.shadowBlur  = 28 * progress;
+
+  // Main body — offset radial gradient so the light source feels top-left
+  const grad = ctx.createRadialGradient(cx - half * 0.25, cy - half * 0.25, 0, cx, cy, half * 1.45);
+  grad.addColorStop(0,    'rgba(160, 215, 255, 0.97)');
+  grad.addColorStop(0.28, 'rgba(70,  145, 230, 0.94)');
+  grad.addColorStop(0.65, 'rgba(28,  80,  175, 0.91)');
+  grad.addColorStop(1,    'rgba(10,  40,  110, 0.88)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(cx - half, cy - half, size, size, corner);
+  ctx.fill();
+
+  // Top-left specular highlight — like light catching a glass surface
+  ctx.shadowBlur = 0;
+  const hi = ctx.createRadialGradient(cx - half * 0.5, cy - half * 0.5, 0, cx - half * 0.2, cy - half * 0.2, half * 0.85);
+  hi.addColorStop(0,   'rgba(255, 255, 255, 0.32)');
+  hi.addColorStop(0.6, 'rgba(180, 220, 255, 0.08)');
+  hi.addColorStop(1,   'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = hi;
+  ctx.beginPath();
+  ctx.roundRect(cx - half, cy - half, size, size, corner);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 // Super bomb button dimensions — mirrored in game.js for hit detection.
 export const SB_BTN_W = 200;
 export const SB_BTN_H = 28;
@@ -343,9 +394,9 @@ export const SB_BTN_Y = WIND_BAR_HEIGHT + 8;
 // Draw the bomb inventory for both players — three pills per player:
 // NORMAL | SUPER | DRILL. Selected pill is highlighted; used-up pills are dim.
 // superBombArmed / tunnelBombArmed may be boolean (sequential) or [bool,bool] (parallel).
-export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, tunnelBombAvailable, tunnelBombArmed, activePlayerIndex, isParallel = false) {
+export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, tunnelBombAvailable, tunnelBombArmed, freezeBombAvailable, freezeBombArmed, activePlayerIndex, isParallel = false) {
   const PILL_W = 60, PILL_H = 24, PILL_GAP = 4;
-  const TOTAL_W = 3 * PILL_W + 2 * PILL_GAP;
+  const TOTAL_W = 4 * PILL_W + 3 * PILL_GAP;
 
   function armedSuper(p)  {
     if (Array.isArray(superBombArmed))  return superBombArmed[p];
@@ -355,17 +406,24 @@ export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed,
     if (Array.isArray(tunnelBombArmed)) return tunnelBombArmed[p];
     return tunnelBombArmed && p === activePlayerIndex;
   }
+  function armedFreeze(p) {
+    if (Array.isArray(freezeBombArmed)) return freezeBombArmed[p];
+    return freezeBombArmed && p === activePlayerIndex;
+  }
 
   function drawPlayer(playerIndex, startX) {
     const color  = playerIndex === 0 ? CHARACTER_COLORS.player1 : CHARACTER_COLORS.player2;
     const aSuper  = armedSuper(playerIndex);
     const aTunnel = armedTunnel(playerIndex);
-    const current = aSuper ? 'super' : (aTunnel ? 'tunnel' : 'normal');
+    const aFreeze = armedFreeze(playerIndex);
+    const current = aSuper ? 'super' : aTunnel ? 'tunnel' : aFreeze ? 'freeze' : 'normal';
 
+    const superCount = superBombAvailable[playerIndex];
     const pills = [
-      { key: 'normal', label: 'NORMAL', avail: true },
-      { key: 'super',  label: 'SUPER',  avail: superBombAvailable[playerIndex] },
-      { key: 'tunnel', label: 'DRILL',  avail: tunnelBombAvailable[playerIndex] },
+      { key: 'normal', label: 'NORMAL',                                          avail: true          },
+      { key: 'super',  label: superCount > 1 ? `SUPER ×${superCount}` : 'SUPER', avail: superCount > 0 },
+      { key: 'tunnel', label: 'DRILL',                                            avail: tunnelBombAvailable[playerIndex] },
+      { key: 'freeze', label: 'FREEZE',                                           avail: freezeBombAvailable[playerIndex] },
     ];
 
     for (let i = 0; i < pills.length; i++) {
@@ -402,7 +460,7 @@ export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed,
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle    = sel
-        ? (key === 'super' ? SUPER_BOMB_INDICATOR_ARMED_COLOR : key === 'tunnel' ? TUNNEL_BOMB_PROJECTILE_COLOR : color)
+        ? (key === 'super' ? SUPER_BOMB_INDICATOR_ARMED_COLOR : key === 'tunnel' ? TUNNEL_BOMB_PROJECTILE_COLOR : key === 'freeze' ? FREEZE_BOMB_PROJECTILE_COLOR : color)
         : (avail ? `${color}88` : 'rgba(90,90,90,0.6)');
       ctx.fillText(avail || key === 'normal' ? label : `${label} ✗`, px + PILL_W / 2, py + PILL_H / 2);
     }
@@ -814,10 +872,12 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
   roundWinsByPlayer   = [0, 0],
   roundBannerWinner   = -1,
   matchBannerWinner   = -1,
-  superBombAvailable  = [true, true],
+  superBombAvailable  = [2, 2],
   superBombArmed      = false,
   tunnelBombAvailable = [true, true],
   tunnelBombArmed     = false,
+  freezeBombAvailable = [true, true],
+  freezeBombArmed     = false,
   playerNames         = ["Player 1", "Player 2"],
   parallelData        = null,
   hp                  = [MAX_HP, MAX_HP],
@@ -836,7 +896,7 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
   drawSky(ctx, world.theme);
   drawWindIndicator(ctx, world.wind);
   drawScoreboard(ctx, roundWinsByPlayer, playerNames);
-  drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, tunnelBombAvailable, tunnelBombArmed, activePlayerIndex, Boolean(parallelData));
+  drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, tunnelBombAvailable, tunnelBombArmed, freezeBombAvailable, freezeBombArmed, activePlayerIndex, Boolean(parallelData));
 
   drawCity(ctx, world);
 
@@ -855,7 +915,7 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
     }
     // Projectiles (array per player)
     for (let i = 0; i < 2; i++) {
-      for (const proj of parallelData.projectiles[i]) drawProjectile(ctx, proj);
+      for (const proj of parallelData.projectiles[i]) { if (proj.frozen) drawFreezeBlock(ctx, proj, timeMs); else drawProjectile(ctx, proj); }
     }
     // Explosions (array per player)
     for (let i = 0; i < 2; i++) {
@@ -871,7 +931,7 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
     if (showAimLine && aim) {
       drawAimLine(ctx, world.characters[activePlayerIndex], aim.angle, aim.velocity, superBombArmed);
     }
-    for (const proj of projectiles) drawProjectile(ctx, proj);
+    for (const proj of projectiles) { if (proj.frozen) drawFreezeBlock(ctx, proj, timeMs); else drawProjectile(ctx, proj); }
     for (const expl of seqExplosions) drawExplosion(ctx, expl, timeMs);
   }
 

@@ -19,6 +19,7 @@ export function setupInput({ onSpacePress }) {
 
   window.addEventListener("keydown", (event) => {
     if (event.key === " " || event.key === "Enter") {
+      if (event.target.tagName === "INPUT") return;
       event.preventDefault();
       if (inputEnabled && onSpacePressCallback) onSpacePressCallback();
     }

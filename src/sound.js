@@ -496,6 +496,39 @@ export function stopDrillSound() {
   osc.stop(now + 0.14);
 }
 
+function playFreezeActivate() {
+  const c   = getCtx();
+  const now = c.currentTime;
+
+  // Ascending crystal chime — four triangle-wave tones
+  [1320, 1760, 2200, 2640].forEach((freq, i) => {
+    const t   = now + i * 0.04;
+    const osc = c.createOscillator();
+    osc.type  = "triangle";
+    osc.frequency.setValueAtTime(freq * 0.95, t);
+    osc.frequency.exponentialRampToValueAtTime(freq, t + 0.01);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    osc.connect(g); g.connect(c.destination);
+    osc.start(t); osc.stop(t + 0.27);
+  });
+
+  // High hiss — noise through highpass
+  const src    = c.createBufferSource();
+  src.buffer   = getNoise();
+  const filter = c.createBiquadFilter();
+  filter.type  = "highpass";
+  filter.frequency.value = 3000;
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0,    now);
+  gain.gain.linearRampToValueAtTime(0.28, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+  src.connect(filter); filter.connect(gain); gain.connect(c.destination);
+  src.start(now); src.stop(now + 0.24);
+}
+
 export function playSound(name) {
   try {
     switch (name) {
@@ -513,6 +546,7 @@ export function playSound(name) {
       case "confirm":         playConfirm();         break;
       case "type":            playType();            break;
       case "playerHit":       playPlayerHit();       break;
+      case "freezeActivate":  playFreezeActivate();  break;
     }
   } catch (_) {
     // Audio errors are non-fatal — game continues without sound.

@@ -150,6 +150,12 @@ export const TUNNEL_BOMB_MAX_DRILL_PX      = 220;
 // Fraction of normal speed the drill bomb moves while inside a building (1.0 = no slowdown).
 export const TUNNEL_BOMB_DRILL_SPEED_FACTOR = 0.15;
 
+export const FREEZE_BOMB_PROJECTILE_RADIUS  = 8;
+export const FREEZE_BOMB_PROJECTILE_COLOR   = '#c8f0ff';
+export const FREEZE_BOMB_BLOCK_SIZE         = 80;
+export const FREEZE_BOMB_BLOCK_COLOR        = '#3a7bbf';
+export const FREEZE_BOMB_EXPAND_DURATION_MS = 600;
+
 // HP each character starts each round with.
 // Direct hits deal 1 damage; super bombs deal 2.
 export const MAX_HP = 3;
