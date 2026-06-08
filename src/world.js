@@ -81,7 +81,13 @@ function drawBuildingToCtx(ctx, building) {
       const windowX = building.x + WINDOW_MARGIN + col * (WINDOW_WIDTH  + WINDOW_GAP_X);
       const windowY = building.y + WINDOW_MARGIN + row * (WINDOW_HEIGHT + WINDOW_GAP_Y);
       ctx.fillStyle = grid[row][col] ? building.winLit : building.winDark;
-      ctx.fillRect(windowX, windowY, WINDOW_WIDTH, WINDOW_HEIGHT);
+      if (building.portholes) {
+        ctx.beginPath();
+        ctx.arc(windowX + WINDOW_WIDTH / 2, windowY + WINDOW_HEIGHT / 2, WINDOW_WIDTH / 2 + 1, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(windowX, windowY, WINDOW_WIDTH, WINDOW_HEIGHT);
+      }
     }
   }
 
@@ -96,6 +102,43 @@ function drawBuildingToCtx(ctx, building) {
   // Roofline highlight — colour comes from the theme.
   ctx.fillStyle = building.roofline;
   ctx.fillRect(building.x, building.y, building.width, 2);
+
+  // Rocky Canyon — stepped rock protrusions along the roofline
+  if (building.rockSteps) {
+    const sw = building.width / building.rockSteps.length;
+    building.rockSteps.forEach((h, i) => {
+      ctx.fillStyle = i % 3 === 0 ? '#3d1806' : i % 3 === 1 ? '#4a2008' : '#5c2c0e';
+      ctx.fillRect(Math.floor(building.x + i * sw), building.y - h, Math.ceil(sw) + 1, h);
+    });
+  }
+
+  // Space Station — antenna towers on rooftop
+  if (building.antennae) {
+    building.antennae.forEach(ant => {
+      const ax = building.x + ant.xOff;
+      ctx.fillStyle = '#607888';
+      ctx.fillRect(ax - 1, building.y - ant.height, 2, ant.height);
+      if (ant.dish) {
+        ctx.fillStyle = '#8aafc0';
+        ctx.beginPath();
+        ctx.ellipse(ax, building.y - ant.height, 6, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = '#99bbcc';
+        ctx.beginPath();
+        ctx.arc(ax, building.y - ant.height, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  }
+
+  // Neon City — horizontal neon accent bands
+  if (building.neonBands) {
+    building.neonBands.forEach(band => {
+      ctx.fillStyle = band.color;
+      ctx.fillRect(building.x, building.y + band.yOff, building.width, 2);
+    });
+  }
 }
 
 // Generate the city, render it to an offscreen canvas, and return all three.
@@ -120,7 +163,7 @@ function generateCity(theme) {
     } while (colorIndex === lastColorIndex && theme.palette.length > 1);
     lastColorIndex = colorIndex;
 
-    buildings.push({
+    const building = {
       x:        currentX,
       y:        GROUND_Y - buildingHeight,
       width:    buildingWidth,
@@ -130,8 +173,33 @@ function generateCity(theme) {
       winDark:  theme.winDark,
       roofline: theme.roofline,
       windows:  generateWindows(buildingWidth, buildingHeight, theme.winLitProb),
-    });
+    };
 
+    if (theme.name === 'ROCKY CANYON') {
+      const stepCount = Math.max(3, Math.floor(buildingWidth / 15));
+      building.rockSteps = Array.from({ length: stepCount }, () => randomInt(5, 26));
+    }
+
+    if (theme.name === 'SPACE STATION') {
+      building.portholes = true;
+      const antennaCount = randomInt(1, 3);
+      building.antennae  = Array.from({ length: antennaCount }, () => ({
+        xOff:   randomInt(6, Math.max(7, buildingWidth - 6)),
+        height: randomInt(12, 30),
+        dish:   Math.random() < 0.45,
+      }));
+    }
+
+    if (theme.name === 'NEON CITY') {
+      const NEON = ['#ff2090', '#00ffcc', '#ff6600', '#cc00ff', '#ffff00'];
+      const bandCount = randomInt(1, 3);
+      building.neonBands = Array.from({ length: bandCount }, () => ({
+        yOff:  randomInt(10, buildingHeight - 6),
+        color: NEON[randomInt(0, NEON.length - 1)],
+      }));
+    }
+
+    buildings.push(building);
     currentX += buildingWidth;
   }
 

@@ -481,6 +481,125 @@ export function drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed,
   drawPlayer(1, CANVAS_WIDTH - SCOREBOARD_MARGIN_X - TOTAL_W);
 }
 
+// ── Per-theme background and atmosphere ─────────────────────────────────────
+
+function drawMountains(ctx) {
+  const layers = [
+    {
+      color: '#130501',
+      pts:   [[0,720],[0,410],[150,305],[300,425],[445,255],[575,365],[700,265],[840,385],[975,285],[1115,395],[1260,315],[1280,355],[1280,720]],
+    },
+    {
+      color: '#1e0a04',
+      pts:   [[0,720],[0,470],[110,400],[235,490],[375,370],[505,458],[635,398],[765,472],[895,402],[1025,468],[1155,408],[1280,448],[1280,720]],
+    },
+    {
+      color: '#2c1208',
+      pts:   [[0,720],[0,535],[90,492],[185,548],[308,442],[428,520],[555,462],[678,528],[798,466],[918,532],[1055,470],[1175,532],[1280,502],[1280,720]],
+    },
+  ];
+  layers.forEach(({ color, pts }) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+    ctx.closePath();
+    ctx.fill();
+  });
+}
+
+function drawPlanet(ctx) {
+  const px = 980, py = 168, pr = 88;
+
+  // Faint nebula behind planet
+  const neb = ctx.createRadialGradient(950, 200, 10, 950, 210, 290);
+  neb.addColorStop(0,   'rgba(45, 85, 165, 0.07)');
+  neb.addColorStop(0.5, 'rgba(85, 45, 125, 0.04)');
+  neb.addColorStop(1,   'rgba(0,  0,  0,   0)');
+  ctx.fillStyle = neb;
+  ctx.fillRect(670, 0, 610, 480);
+
+  // Back half of ring
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+  ctx.strokeStyle = '#7799bb';
+  ctx.lineWidth   = 14;
+  ctx.beginPath();
+  ctx.ellipse(px, py, pr * 1.95, pr * 0.38, -0.18, Math.PI, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Planet body
+  const body = ctx.createRadialGradient(px - 28, py - 28, 6, px, py, pr);
+  body.addColorStop(0,    '#4e7a8e');
+  body.addColorStop(0.35, '#2a5570');
+  body.addColorStop(0.72, '#153850');
+  body.addColorStop(1,    '#071c2e');
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.arc(px, py, pr, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Atmospheric band stripes
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(px, py, pr, 0, Math.PI * 2);
+  ctx.clip();
+  [
+    { y: py - 22, h: 12, a: 0.05 },
+    { y: py +  8, h:  8, a: 0.04 },
+    { y: py - 44, h:  6, a: 0.06 },
+  ].forEach(b => {
+    ctx.fillStyle = `rgba(180, 220, 255, ${b.a})`;
+    ctx.fillRect(px - pr, b.y, pr * 2, b.h);
+  });
+  ctx.restore();
+
+  // Specular highlight
+  const hi = ctx.createRadialGradient(px - 30, py - 30, 0, px - 10, py - 10, pr * 0.65);
+  hi.addColorStop(0, 'rgba(200, 232, 255, 0.20)');
+  hi.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = hi;
+  ctx.beginPath();
+  ctx.arc(px, py, pr, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Front half of ring (over planet)
+  ctx.save();
+  ctx.globalAlpha = 0.42;
+  ctx.strokeStyle = '#aaccee';
+  ctx.lineWidth   = 14;
+  ctx.beginPath();
+  ctx.ellipse(px, py, pr * 1.95, pr * 0.38, -0.18, 0, Math.PI);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBackground(ctx, world) {
+  const name = world.theme.name;
+  if (name === 'ROCKY CANYON') drawMountains(ctx);
+  if (name === 'SPACE STATION') drawPlanet(ctx);
+}
+
+function drawRain(ctx, timeMs) {
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 80; i++) {
+    const x       = (i * 181 + 47) % CANVAS_WIDTH;
+    const y       = ((timeMs * 0.18 + i * 109) % (CANVAS_HEIGHT - WIND_BAR_HEIGHT)) + WIND_BAR_HEIGHT;
+    const alpha   = 0.10 + (i % 5) * 0.02;
+    ctx.strokeStyle = `rgba(155, 200, 255, ${alpha})`;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 3, y + 28);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawAtmosphere(ctx, world, timeMs) {
+  if (world.theme.name === 'NEON CITY') drawRain(ctx, timeMs);
+}
+
 // Draw the downward-pointing triangle that bobs above the active character.
 export function drawActiveIndicator(ctx, character, timeMs) {
   const bobOffset = Math.sin(timeMs / 300) * ACTIVE_INDICATOR_BOUNCE_PIXELS;
@@ -633,8 +752,8 @@ export function drawCharacterSelect(ctx, { charSelectPhase, charPreview, playerN
 
     // Mode cards
     const modes = [
-      { label: "SEQUENTIAL", sub: "Players take turns" },
       { label: "PARALLEL",   sub: "Both fire at once" },
+      { label: "SEQUENTIAL", sub: "Players take turns" },
     ];
     const cardW = 320, cardH = 160, cardGap = 60;
     const totalW = modes.length * cardW + (modes.length - 1) * cardGap;
@@ -666,13 +785,11 @@ export function drawCharacterSelect(ctx, { charSelectPhase, charPreview, playerN
       ctx.fillStyle    = isSel ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.22)";
       ctx.fillText(modes[i].sub, cx + cardW / 2, cardY + cardH * 0.62);
 
-      if (i === 1) {
-        ctx.font      = "12px 'Courier New', monospace";
-        ctx.fillStyle = isSel ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.18)";
+      ctx.font      = "12px 'Courier New', monospace";
+      ctx.fillStyle = isSel ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.18)";
+      if (i === 0) {
         ctx.fillText("P1: SHIFT  |  P2: SHIFT →", cx + cardW / 2, cardY + cardH * 0.80);
       } else {
-        ctx.font      = "12px 'Courier New', monospace";
-        ctx.fillStyle = isSel ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.18)";
         ctx.fillText("SPACE to aim and fire", cx + cardW / 2, cardY + cardH * 0.80);
       }
     }
@@ -894,11 +1011,13 @@ export function drawScene(ctx, world, activePlayerIndex, timeMs, {
   }
 
   drawSky(ctx, world.theme);
+  drawBackground(ctx, world);
   drawWindIndicator(ctx, world.wind);
   drawScoreboard(ctx, roundWinsByPlayer, playerNames);
   drawSuperBombIndicators(ctx, superBombAvailable, superBombArmed, tunnelBombAvailable, tunnelBombArmed, freezeBombAvailable, freezeBombArmed, activePlayerIndex, Boolean(parallelData));
 
   drawCity(ctx, world);
+  drawAtmosphere(ctx, world, timeMs);
 
   if (parallelData) {
     // Parallel mode — draw both characters; arm-up per player

@@ -57,7 +57,7 @@ window.addEventListener("DOMContentLoaded", () => {
   let charPreview     = [0, 0];
   let playerNames     = ["Player 1", "Player 2"];
   let charNameInput   = "";
-  let gameModeIndex   = 1;   // 0 = SEQUENTIAL, 1 = PARALLEL
+  let gameModeIndex   = 0;   // 0 = PARALLEL, 1 = SEQUENTIAL
 
   let roundIndex              = 0;
   let hp                      = [MAX_HP, MAX_HP];
@@ -277,11 +277,14 @@ window.addEventListener("DOMContentLoaded", () => {
     if (gameMode === GameMode.SEQUENTIAL && currentState === GameState.RESOLVING) {
       const fp = projectiles.find(p => p.isFreezeBomb && !p.frozen);
       if (fp) {
-        fp.frozen   = true;
-        fp.frozenAt = performance.now();
-        fp.vx       = 0;
-        fp.vy       = 0;
-        fp.trail    = [];
+        fp.frozen          = true;
+        fp.frozenAt        = performance.now();
+        fp.vx              = 0;
+        fp.vy              = 0;
+        fp.trail           = [];
+        seqAimingForReload = false;
+        seqReloadAt        = null;
+        setInputEnabled(false);
         playSound("freezeActivate");
         return;
       }
@@ -301,9 +304,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // ── Parallel functions ──────────────────────────────────────────────────────
   function resetParallelState() {
+    const quarterPeriodMs = (ANGLE_MAX / ANGLE_CYCLE_SPEED) * 500;
     for (let p = 0; p < 2; p++) {
       if (par[p].armUpTimer !== null) clearTimeout(par[p].armUpTimer);
       par[p] = parInit();
+      par[p].cycleStartTime = performance.now() - quarterPeriodMs;
     }
     parallelRoundOver = false;
   }
@@ -372,7 +377,7 @@ window.addEventListener("DOMContentLoaded", () => {
     charNameInput   = "";
     nameInput.value = "";
     nameInput.blur();
-    if (charSelectPhase < 1) {
+    if (charSelectPhase < 2) {
       charSelectPhase++;
       playSound("confirm");
       redraw();
@@ -435,7 +440,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // ── Game flow ───────────────────────────────────────────────────────────────
   function startGame() {
-    gameMode = gameModeIndex === 0 ? GameMode.SEQUENTIAL : GameMode.PARALLEL;
+    gameMode = gameModeIndex === 0 ? GameMode.PARALLEL : GameMode.SEQUENTIAL;
     buildWorld();
     activePlayerIndex = 0;
     if (gameMode === GameMode.PARALLEL) {
@@ -508,7 +513,6 @@ window.addEventListener("DOMContentLoaded", () => {
     hp                      = [MAX_HP, MAX_HP];
     activePlayerIndex       = 0;
     charSelectPhase         = 0;
-    gameModeIndex           = 0;
     playerNames             = ["Player 1", "Player 2"];
     charNameInput           = "";
     currentState            = GameState.CHARACTER_SELECT;
@@ -639,6 +643,24 @@ window.addEventListener("DOMContentLoaded", () => {
     if (currentState === GameState.CHARACTER_SELECT && charSelectPhase < 2) {
       event.preventDefault();
       handleCharSelectPointer(cx, cy);
+      return;
+    }
+
+    if (currentState === GameState.CHARACTER_SELECT && charSelectPhase === 2) {
+      event.preventDefault();
+      const cardW = 320, cardH = 160, cardGap = 60;
+      const totalW = 2 * cardW + cardGap;
+      const cardStartX = (CANVAS_WIDTH - totalW) / 2;
+      const cardY = 200;
+      for (let i = 0; i < 2; i++) {
+        const cardX = cardStartX + i * (cardW + cardGap);
+        if (cx >= cardX && cx <= cardX + cardW && cy >= cardY && cy <= cardY + cardH) {
+          gameModeIndex = i;
+          playSound("confirm");
+          startGame();
+          return;
+        }
+      }
       return;
     }
 
@@ -950,7 +972,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
     // ── SEQUENTIAL aim cycling ───────────────────────────────────────────────
     if ((currentState === GameState.PLAYER_TURN || (currentState === GameState.RESOLVING && seqAimingForReload)) && !isArmUp && gameMode === GameMode.SEQUENTIAL) {
-      if (cycleStartTime === null) cycleStartTime = timeMs;
+      if (cycleStartTime === null) {
+        cycleStartTime = cyclePhase === 'angle'
+          ? timeMs - (ANGLE_MAX / ANGLE_CYCLE_SPEED) * 500
+          : timeMs;
+      }
       const elapsed = timeMs - cycleStartTime;
       if (cyclePhase === 'angle') {
         setAim(triangleWave(elapsed, ANGLE_MAX, ANGLE_CYCLE_SPEED), AIM_LINE_MIN_VELOCITY);
